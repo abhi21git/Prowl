@@ -247,6 +247,28 @@ struct CommandPaletteFeatureTests {
     #expect(searchedItems.contains(where: { $0.id == changeIconItem?.id }))
   }
 
+  @Test func filterItemsEmptyQueryHonorsDefaultSuggestionFlagOnly() {
+    let suggested = CommandPaletteItem(
+      id: "suggested",
+      title: "Suggested",
+      subtitle: nil,
+      kind: .openSettings,
+      category: .app,
+      defaultSuggestion: true
+    )
+    let hidden = CommandPaletteItem(
+      id: "hidden",
+      title: "Hidden",
+      subtitle: nil,
+      kind: .openSettings,
+      category: .app,
+      defaultSuggestion: false
+    )
+
+    let result = CommandPaletteFeature.filterItems(items: [suggested, hidden], query: "")
+    expectNoDifference(result.map(\.id), [suggested.id])
+  }
+
   @Test func emptyQueryHidesGhosttyCommands() {
     let ghosttyItem = makeItem(
       id: "ghostty.goto_split:right|Focus Split Right",
