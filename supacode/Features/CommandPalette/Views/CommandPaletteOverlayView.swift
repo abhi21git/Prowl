@@ -599,13 +599,13 @@ private struct CommandPaletteRowView: View {
     case .toggleLeftSidebar:
       return "sidebar.left"
     case .toggleActiveAgentsPanel:
-      return "person.2"
+      return "person.crop.rectangle.stack"
     case .toggleCanvas:
       return "square.grid.2x2"
     case .toggleShelf:
       return "books.vertical"
     case .showDiff:
-      return "doc.text.magnifyingglass"
+      return "plusminus.circle"
     #if DEBUG
       case .debugTestToast:
         return "ladybug"
