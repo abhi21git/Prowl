@@ -189,11 +189,58 @@ struct CommandPaletteFeatureTests {
 
     let buildItem = items.first { $0.id == "custom-command.cmd-build" }
     #expect(buildItem?.title == "Build")
-    #expect(buildItem?.subtitle == "New Tab")
+    #expect(buildItem?.subtitle == "Custom command in this repo · Opens in a new tab")
     #expect(buildItem?.defaultSuggestion == false)
     #expect(
       buildItem?.kind
         == .runCustomCommand(index: 0, commandID: "cmd-build", systemImage: "hammer")
+    )
+  }
+
+  @Test func commandPaletteItems_customCommandSubtitleVariants() {
+    let shellCmd = UserCustomCommand(
+      id: "cmd-shell",
+      title: "Shell",
+      systemImage: "terminal",
+      command: "make",
+      execution: .shellScript,
+      shortcut: nil
+    )
+    let inlineCmd = UserCustomCommand(
+      id: "cmd-inline",
+      title: "Inline",
+      systemImage: "terminal",
+      command: "ls",
+      execution: .terminalInput,
+      shortcut: nil
+    )
+    let splitCmd = UserCustomCommand(
+      id: "cmd-split",
+      title: "Split",
+      systemImage: "terminal",
+      command: "watch",
+      execution: .split,
+      splitDirection: .down,
+      closeOnSuccess: false,
+      shortcut: nil
+    )
+
+    let items = CommandPaletteFeature.commandPaletteItems(
+      from: RepositoriesFeature.State(),
+      customCommands: [shellCmd, inlineCmd, splitCmd]
+    )
+
+    #expect(
+      items.first { $0.id == "custom-command.cmd-shell" }?.subtitle
+        == "Custom command in this repo · Opens in a new tab"
+    )
+    #expect(
+      items.first { $0.id == "custom-command.cmd-inline" }?.subtitle
+        == "Custom command in this repo · Runs in the focused terminal"
+    )
+    #expect(
+      items.first { $0.id == "custom-command.cmd-split" }?.subtitle
+        == "Custom command in this repo · Opens in a new split (down)"
     )
   }
 

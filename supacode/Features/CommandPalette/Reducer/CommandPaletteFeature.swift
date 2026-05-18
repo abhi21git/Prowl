@@ -431,7 +431,7 @@ private func customCommandItems(_ commands: [UserCustomCommand]) -> [CommandPale
     return CommandPaletteItem(
       id: CommandPaletteItemID.customCommand(command.id),
       title: command.resolvedTitle,
-      subtitle: command.execution.title,
+      subtitle: customCommandSubtitle(for: command),
       kind: .runCustomCommand(
         index: index,
         commandID: command.id,
@@ -441,6 +441,21 @@ private func customCommandItems(_ commands: [UserCustomCommand]) -> [CommandPale
       defaultSuggestion: false,
       keywords: ["custom", "command", "script"]
     )
+  }
+}
+
+private func customCommandSubtitle(for command: UserCustomCommand) -> String {
+  "Custom command in this repo · \(customCommandExecutionDescription(for: command))"
+}
+
+private func customCommandExecutionDescription(for command: UserCustomCommand) -> String {
+  switch command.execution {
+  case .shellScript:
+    return "Opens in a new tab"
+  case .terminalInput:
+    return "Runs in the focused terminal"
+  case .split:
+    return "Opens in a new split (\(command.splitDirection.title.lowercased()))"
   }
 }
 
