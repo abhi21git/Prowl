@@ -159,7 +159,9 @@ struct CommandPaletteFeatureTests {
     let ids = Set(items.map(\.id))
     #expect(!ids.contains("global.toggle-pin-worktree"))
     #expect(!ids.contains("global.delete-worktree"))
-    #expect(!ids.contains("global.rename-branch"))
+    // Rename Branch is still available on the main worktree — `git branch -m`
+    // works on the main branch the same as any other.
+    #expect(ids.contains("global.rename-branch"))
   }
 
   @Test func commandPaletteItems_includesDeleteWorktreeForNonMain() {

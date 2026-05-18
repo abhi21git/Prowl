@@ -396,41 +396,43 @@ private func worktreeActionCommandItems(
       )
     )
   }
-  if let row = repositories.selectedRow(for: worktreeID), !row.isMainWorktree {
-    let pinTitle = row.isPinned ? "Unpin Worktree" : "Pin Worktree"
-    let pinKeywords =
-      row.isPinned ? ["unpin", "favorite"] : ["pin", "favorite", "top"]
+  guard let row = repositories.selectedRow(for: worktreeID) else { return items }
+  // Rename Branch works on any worktree (main included).
+  items.append(
+    .appShortcut(
+      id: CommandPaletteItemID.globalRenameBranch,
+      title: "Rename Branch",
+      category: .worktree,
+      kind: .renameBranch,
+      keywords: ["rename", "branch", "name"]
+    )
+  )
+  // Pin / Unpin / Delete only apply to non-main worktrees.
+  guard !row.isMainWorktree else { return items }
+  let pinTitle = row.isPinned ? "Unpin Worktree" : "Pin Worktree"
+  let pinKeywords =
+    row.isPinned ? ["unpin", "favorite"] : ["pin", "favorite", "top"]
+  items.append(
+    .appShortcut(
+      id: CommandPaletteItemID.globalTogglePinWorktree,
+      title: pinTitle,
+      category: .worktree,
+      kind: .togglePinWorktree(worktreeID, isCurrentlyPinned: row.isPinned),
+      keywords: pinKeywords
+    )
+  )
+  if let repositoryID = repositories.repositoryID(containing: worktreeID) {
     items.append(
-      .appShortcut(
-        id: CommandPaletteItemID.globalTogglePinWorktree,
-        title: pinTitle,
+      CommandPaletteItem(
+        id: CommandPaletteItemID.globalDeleteWorktree,
+        title: "Delete Worktree",
+        subtitle: row.name,
+        kind: .deleteWorktree(worktreeID, repositoryID),
         category: .worktree,
-        kind: .togglePinWorktree(worktreeID, isCurrentlyPinned: row.isPinned),
-        keywords: pinKeywords
+        defaultSuggestion: false,
+        keywords: ["delete", "remove", "destroy"]
       )
     )
-    items.append(
-      .appShortcut(
-        id: CommandPaletteItemID.globalRenameBranch,
-        title: "Rename Branch",
-        category: .worktree,
-        kind: .renameBranch,
-        keywords: ["rename", "branch", "name"]
-      )
-    )
-    if let repositoryID = repositories.repositoryID(containing: worktreeID) {
-      items.append(
-        CommandPaletteItem(
-          id: CommandPaletteItemID.globalDeleteWorktree,
-          title: "Delete Worktree",
-          subtitle: row.name,
-          kind: .deleteWorktree(worktreeID, repositoryID),
-          category: .worktree,
-          defaultSuggestion: false,
-          keywords: ["delete", "remove", "destroy"]
-        )
-      )
-    }
   }
   return items
 }
