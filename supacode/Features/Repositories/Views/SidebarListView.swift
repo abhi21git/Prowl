@@ -5,6 +5,33 @@ import SwiftUI
 // Uses LazyVStack rather than List for repository drag precision; keyboard
 // worktree navigation goes through Cmd+Ctrl+↑/↓ (`selectNextWorktree`).
 struct SidebarListView: View {
+  enum RepositoryListHeaderAction: Equatable {
+    case expandAll
+    case collapseAll
+
+    var title: String {
+      switch self {
+      case .expandAll:
+        return "Expand All"
+      case .collapseAll:
+        return "Collapse All"
+      }
+    }
+
+    var systemImageName: String {
+      "chevron.right"
+    }
+
+    var rotation: Angle {
+      switch self {
+      case .expandAll:
+        return .zero
+      case .collapseAll:
+        return .degrees(90)
+      }
+    }
+  }
+
   @Bindable var store: StoreOf<RepositoriesFeature>
   @Binding var expandedRepoIDs: Set<Repository.ID>
   @Binding var sidebarSelections: Set<SidebarSelection>
@@ -21,6 +48,11 @@ struct SidebarListView: View {
     let state = store.state
     let hotkeyRows = state.orderedWorktreeRows(includingRepositoryIDs: expandedRepoIDs)
     let presentation = state.sidebarPresentation(expandedRepositoryIDs: expandedRepoIDs)
+    let expandableRepositoryIDs = Self.expandableRepositoryIDs(in: state.repositories)
+    let repositoryListHeaderAction = Self.repositoryListHeaderAction(
+      expandedRepoIDs: expandedRepoIDs,
+      expandableRepositoryIDs: expandableRepositoryIDs
+    )
     let repositoryItems = presentation.items.filter(\.isRepositoryOrderItem)
     let selectedWorktreeIDs = Self.selectedWorktreeIDs(in: state)
     let selectedSurfaceID = state.selectedWorktreeID.flatMap { worktreeID in
@@ -48,6 +80,11 @@ struct SidebarListView: View {
           Section {
             if repositoryItems.isEmpty {
               emptyRepositoryHint()
+            } else {
+              repositoryListHeader(
+                action: repositoryListHeaderAction,
+                expandableRepositoryIDs: expandableRepositoryIDs
+              )
             }
             ForEach(Array(repositoryItems.enumerated()), id: \.element.id) { index, item in
               repositoryItemView(
@@ -161,6 +198,44 @@ struct SidebarListView: View {
         }
       }
     }
+  }
+
+  private func repositoryListHeader(
+    action: RepositoryListHeaderAction,
+    expandableRepositoryIDs: Set<Repository.ID>
+  ) -> some View {
+    HStack(spacing: 4) {
+      Text("Repositories")
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if !expandableRepositoryIDs.isEmpty {
+        Button {
+          withAnimation(.easeOut(duration: 0.2)) {
+            switch action {
+            case .expandAll:
+              expandedRepoIDs.formUnion(expandableRepositoryIDs)
+            case .collapseAll:
+              expandedRepoIDs.subtract(expandableRepositoryIDs)
+            }
+          }
+        } label: {
+          Label(action.title, systemImage: action.systemImageName)
+            .labelStyle(.iconOnly)
+            .frame(width: 20, height: 20)
+            .rotationEffect(action.rotation)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(action.title)
+      }
+    }
+    .frame(maxWidth: .infinity, minHeight: 26, alignment: .center)
+    .padding(.leading, 12)
+    .padding(.trailing, 7)
+    .padding(.top, 2)
+    .padding(.bottom, 4)
   }
 
   private func emptyRepositoryHint() -> some View {
@@ -319,6 +394,25 @@ struct SidebarListView: View {
     store.send(.consumePendingSidebarReveal(pendingSidebarReveal.id))
   }
 
+  static func expandableRepositoryIDs<Repositories: Sequence>(
+    in repositories: Repositories
+  ) -> Set<Repository.ID> where Repositories.Element == Repository {
+    Set(
+      repositories
+        .filter(\.capabilities.supportsWorktrees)
+        .map(\.id)
+    )
+  }
+
+  static func repositoryListHeaderAction(
+    expandedRepoIDs: Set<Repository.ID>,
+    expandableRepositoryIDs: Set<Repository.ID>
+  ) -> RepositoryListHeaderAction {
+    !expandedRepoIDs.isDisjoint(with: expandableRepositoryIDs)
+      ? .collapseAll
+      : .expandAll
+  }
+
   static func selectedWorktreeIDs(in state: RepositoriesFeature.State) -> Set<Worktree.ID> {
     var selectedWorktreeIDs = state.sidebarSelectedWorktreeIDs
     if let selectedWorktreeID = state.selectedWorktreeID {
@@ -399,7 +493,7 @@ extension SidebarItem {
         terminalManager: terminalManager
       )
       .environment(CommandKeyObserver())
-      .frame(width: 280, height: 500)
+      .frame(width: 320, height: 500)
     }
 
     private static var mockState: RepositoriesFeature.State {

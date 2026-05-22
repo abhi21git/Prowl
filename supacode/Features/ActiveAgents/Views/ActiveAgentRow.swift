@@ -98,7 +98,7 @@ struct BaguaWorkingIndicator: View {
         ForEach(0..<3, id: \.self) { row in
           HStack(spacing: 2) {
             ForEach(0..<3, id: \.self) { col in
-              dot(opacity: opacity(row: row, col: col, phase: phase))
+              dot(opacity: Self.opacity(row: row, col: col, phase: phase))
             }
           }
         }
@@ -108,18 +108,22 @@ struct BaguaWorkingIndicator: View {
     }
   }
 
-  private func opacity(row: Int, col: Int, phase: Double) -> Double {
-    if row == 1 && col == 1 { return 0.18 }
+  // Dimmest opacity for off-pulse dots (and the always-static center).
+  static let baseOpacity: Double = 0.18
+
+  static func opacity(row: Int, col: Int, phase: Double) -> Double {
+    if row == 1 && col == 1 { return baseOpacity }
     guard
-      let index = Self.perimeter.firstIndex(where: { $0.row == row && $0.col == col })
+      let index = perimeter.firstIndex(where: { $0.row == row && $0.col == col })
     else {
-      return 0.18
+      return baseOpacity
     }
-    let count = Double(Self.perimeter.count)
+    let count = Double(perimeter.count)
     let raw = abs(Double(index) - phase)
+    // Wrap the distance so the pulse stays continuous across the seam.
     let distance = min(raw, count - raw)
     let intensity = max(0, 1 - distance / 3)
-    return 0.18 + intensity * 0.82
+    return baseOpacity + intensity * (1 - baseOpacity)
   }
 
   private func dot(opacity: Double) -> some View {
