@@ -216,7 +216,14 @@ struct SidebarListView: View {
         requiresRepository: true
       )
     }
-    .background(.thinMaterial, in: Capsule())
+    .background {
+      // Glass track, brightened by the same fill the terminal tab bar's capsule
+      // uses so the inactive (unselected) segments read at the same level as the
+      // tab bar instead of sitting darker on the bare material.
+      Capsule()
+        .fill(.thinMaterial)
+        .overlay(Capsule().fill(TerminalTabBarColors.barBackground))
+    }
     .padding(.horizontal, 8)
     .padding(.vertical, 2)
   }
