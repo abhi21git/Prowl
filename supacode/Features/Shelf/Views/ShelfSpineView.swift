@@ -121,24 +121,26 @@ struct ShelfSpineView: View {
   /// "this is interactable" affordance that sits just below the open
   /// book and animates in/out smoothly.
   ///
-  /// The surface hue/alpha come from `ShelfSurfaceTint`: a repo with a
-  /// user-pinned color tints its spine with that color, while an uncolored
-  /// repo uses a neutral surface (near-black in dark mode, near-white in
-  /// light) so the shelf stays calm and the open book's spine reads as one
-  /// continuous "L" with the toolbar tint band above it. The proximity
-  /// ladder is unchanged — we only swap the base.
+  /// The surface hue/alpha come from `WindowChromeTint`'s repository-color
+  /// surface: a repo with a user-pinned color tints its spine with that
+  /// color, while an uncolored repo uses a neutral surface (near-black in
+  /// dark mode, near-white in light) so the shelf stays calm and the open
+  /// book's spine reads as one continuous "L" with the toolbar tint band
+  /// above it. The spine always uses the repo color and ignores the global
+  /// `WindowTintMode` — only the chrome bands honor that setting. The
+  /// proximity ladder is unchanged — we only swap the base.
   private var spineBackgroundColor: Color {
     guard distanceFromOpen != nil else {
       return Color.primary.opacity(0.06)
     }
     let multiplier = isHovering && !isOpen ? 0.8 : accentProximityMultiplier
-    return ShelfSurfaceTint.base(for: appearance.color)
-      .opacity(ShelfSurfaceTint.peakAlpha(for: appearance.color) * multiplier)
+    return WindowChromeTint.repositoryBase(for: appearance.color)
+      .opacity(WindowChromeTint.repositoryPeakAlpha(for: appearance.color) * multiplier)
   }
 
   /// Repo's pinned color, or `.accentColor` when none — used as the header
   /// icon tint and the active-tab highlight. The spine *surface* fill
-  /// instead routes through `ShelfSurfaceTint` (neutral when uncolored), so
+  /// instead routes through `WindowChromeTint` (neutral when uncolored), so
   /// an uncolored repo keeps an accent icon / tab marker on an otherwise
   /// neutral spine.
   private var effectiveTintColor: Color {

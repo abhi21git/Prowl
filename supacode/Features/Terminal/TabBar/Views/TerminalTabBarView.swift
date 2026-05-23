@@ -2,6 +2,12 @@ import SwiftUI
 
 struct TerminalTabBarView: View {
   @Bindable var manager: TerminalTabManager
+  /// Chrome tint painted as a full-width strip behind the whole bar row —
+  /// the left gap, the tabs, and the trailing accessories — so the bar's
+  /// backing reads as part of the same tinted chrome as the toolbar above.
+  /// The tabs keep their own neutral capsule on top. `nil` leaves the bare
+  /// (untinted) bar chrome.
+  var barTint: WindowChromeTint.Fill?
   let createTab: () -> Void
   let splitHorizontally: () -> Void
   let splitVertically: () -> Void
@@ -28,8 +34,8 @@ struct TerminalTabBarView: View {
         closeAll: closeAll,
         hasNotification: hasNotification
       )
-      // Background wraps only the tabs; the trailing accessories (+ / splits)
-      // sit outside it on the bare bar chrome.
+      // Capsule wraps only the tabs; the trailing accessories (+ / splits)
+      // sit outside it on the bar chrome.
       .background(TerminalTabBarBackground())
       Spacer(minLength: 0)
       TerminalTabBarTrailingAccessories(
@@ -40,7 +46,18 @@ struct TerminalTabBarView: View {
       )
     }
     .frame(height: TerminalTabBarMetrics.barHeight)
+    // Desaturate only the bar *contents* (tabs + accessories) when the window
+    // is inactive — the tint band below stays out of this scope so it keeps
+    // its hue on blur, matching the toolbar / nav chrome (which don't gray out).
     .saturation(activeState == .inactive ? 0 : 1)
+    // Tint the full-width bar backing (behind the left gap, tabs capsule, and
+    // trailing accessories) so it joins the toolbar / nav chrome as one tinted
+    // surface. Fixed band alpha mirrors `windowChromeTint`; `nil` leaves it bare.
+    .background {
+      if let barTint {
+        barTint.color.opacity(barTint.alpha)
+      }
+    }
     .clipped()
   }
 }
@@ -76,6 +93,7 @@ struct TerminalTabBarView: View {
           .foregroundStyle(.secondary)
         TerminalTabBarView(
           manager: manager,
+          barTint: nil,
           createTab: {},
           splitHorizontally: {},
           splitVertically: {},
