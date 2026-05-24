@@ -1,5 +1,29 @@
 # Changelog
 
+## [2026.5.24](https://github.com/onevcat/Prowl/releases/tag/v2026.5.24)
+
+This release redesigns the terminal tab bar and sidebar to sit more naturally within macOS, introduces a window tint that colors the chrome to match your repository, and adds keyboard navigation for the Active Agents panel.
+
+### New
+
+- **Navigate the Active Agents panel from the keyboard.** Press ⌃⌥↓ to jump to the next agent and ⌃⌥↑ for the previous one. Navigation is anchored on the focused agent, wraps at the ends of the list, and focuses the target agent's terminal. The panel header reveals the hint while ⌘ is held, and both commands are rebindable in Settings → Shortcuts.
+- **Window tint setting.** A new Window Tint option in Settings → Appearance colors the navigation panel and toolbar. Choose None for the neutral system look, Repository Color to match the active repository's pinned color, or Custom Color to apply a single color everywhere.
+- **Custom repository colors.** Beyond the built-in presets, you can now assign any color to a repository from the appearance picker.
+- **Canvas remembers your layout.** Card positions and stacking order are now saved and restored on relaunch instead of being auto-arranged over, and focused cards come to the front.
+
+### Improved
+
+- **Refined terminal tab bar.** Tabs now float as glass cards with centered titles and stretch to fill the available width. The close button moved to the leading edge and reveals on hover, with a tuned dark-mode brightness ladder and tidier spacing between the tabs and the terminal.
+- **Reworked sidebar header.** The view-mode switcher is now a fixed top bar, and Expand/Collapse All is back in the repository header.
+- **Redesigned command palette and Find bar.** The command palette adopts the macOS glass material with a softer selection highlight, and the in-terminal Find bar takes on a capsule shape with streamlined icon-only controls.
+- **Repository-colored chrome.** The Shelf spine, and the window chrome when tinting is enabled, take on the open repository's color, and the repo color dot stays solid even when the window loses focus.
+- **Polish throughout.** Restored the bagua working indicator for agents, improved the empty state shown when no repositories are open, and widened the minimum settings window.
+
+### Fixed
+
+- **No flicker when selecting an agent.** Choosing an agent in the Active Agents panel, by click or keyboard, no longer briefly shows the wrong tab or highlights the wrong agent.
+- **Stable toolbar title.** Hovering the worktree title in the toolbar no longer shifts the other toolbar items.
+
 ## [2026.5.20](https://github.com/onevcat/Prowl/releases/tag/v2026.5.20)
 
 ### Fixed
