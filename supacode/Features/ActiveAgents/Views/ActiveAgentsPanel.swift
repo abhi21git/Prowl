@@ -8,6 +8,9 @@ struct ActiveAgentsPanel: View {
   let branchNamesByWorktreeID: [Worktree.ID: String]
   let repositoryColorsByWorktreeID: [Worktree.ID: RepositoryColorChoice]
   let selectedSurfaceID: UUID?
+  /// Merged "⌥⌃↑↓" hint shown while Cmd is held; `nil` hides it (bindings customized
+  /// or Cmd not held). Resolved by the parent so the panel stays presentational.
+  let navigationShortcutHint: String?
   let height: Double
   let maximumHeight: Double
   let onHeightChanged: (Double) -> Void
@@ -23,10 +26,15 @@ struct ActiveAgentsPanel: View {
           .font(.caption)
           .foregroundStyle(.secondary)
         Spacer()
+        if let navigationShortcutHint, !store.entries.isEmpty {
+          ShortcutHintView(text: navigationShortcutHint, color: .secondary)
+            .transition(.opacity)
+        }
       }
       .padding(.horizontal, 12)
       .padding(.top, 8)
       .padding(.bottom, 4)
+      .animation(.easeInOut(duration: 0.15), value: navigationShortcutHint)
 
       if store.entries.isEmpty {
         Spacer(minLength: 0)

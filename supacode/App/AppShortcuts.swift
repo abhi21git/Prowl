@@ -819,6 +819,24 @@ enum AppShortcuts {
     return display(for: worktreeSelectionCommandIDs[index], in: resolvedKeybindings)
   }
 
+  /// Combined up/down display for the Active Agents list navigation (e.g. "⌥⌃↑↓").
+  ///
+  /// Returns `nil` once either binding has been customized, so callers can hide a
+  /// hint that the merged glyph form could otherwise render inaccurately.
+  static func activeAgentsNavigationDisplay(in resolvedKeybindings: ResolvedKeybindingMap) -> String? {
+    guard
+      let previous = resolvedKeybindings.binding(for: CommandID.selectPreviousActiveAgent),
+      let next = resolvedKeybindings.binding(for: CommandID.selectNextActiveAgent),
+      previous.source == .appDefault,
+      next.source == .appDefault,
+      let upDisplay = resolvedKeybindings.display(for: CommandID.selectPreviousActiveAgent),
+      let downGlyph = resolvedKeybindings.display(for: CommandID.selectNextActiveAgent)?.last
+    else {
+      return nil
+    }
+    return upDisplay + String(downGlyph)
+  }
+
   static func terminalTabSelectionDisplay(at index: Int, in resolvedKeybindings: ResolvedKeybindingMap) -> String? {
     guard terminalTabSelectionCommandIDs.indices.contains(index) else { return nil }
     return display(for: terminalTabSelectionCommandIDs[index], in: resolvedKeybindings)
