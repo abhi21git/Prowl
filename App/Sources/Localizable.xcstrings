@@ -10769,12 +10769,12 @@
         }
       }
     },
-    "No agent skill folder was found in your home directory. Run Claude Code, Codex, or another agent once so it creates its folder, or create one from a terminal with prowl skills install --target claude|codex|agents|devin|antigravity." : {
+    "No agent skill folder was found in your home directory. Run Claude Code, Codex, or another agent once so it creates its folder, or create one from a terminal with prowl skills install --target claude|codex|agents|devin|antigravity|trae." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未在主目录中找到 Agent 技能文件夹。请先运行一次 Claude Code、Codex 或其他 Agent 以创建其文件夹，或在终端中使用 prowl skills install --target claude|codex|agents|devin|antigravity 创建。"
+            "value" : "未在主目录中找到 Agent 技能文件夹。请先运行一次 Claude Code、Codex 或其他 Agent 以创建其文件夹，或在终端中使用 prowl skills install --target claude|codex|agents|devin|antigravity|trae 创建。"
           }
         }
       }
