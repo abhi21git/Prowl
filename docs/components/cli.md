@@ -239,7 +239,8 @@ Each agent contains:
   - `host` (`user@hostname`), `user`, `hostname`, `port`: absent while the connection
     is not resolved.
   - `correlation`: `pending`, `correlated`, `ambiguous`, `unmapped`,
-    `probe_unavailable`, or `unsupported`.
+    `probe_unavailable`, `unsupported`, or `tmux_unreachable` (the pane shows a tmux
+    client whose server Prowl cannot reach).
   - `correlation_reason`: why. For `probe_unavailable` it is a code: `authentication`,
     `host_key`, `unresolvable_host`, `unreachable`, `launch`, `exit`,
     `unrecognized_output`, or `connection_failed`. For `unsupported` it names the `ssh`
@@ -417,7 +418,8 @@ first. Because a receipt can precede Codex's own `turn-ended` by a second or two
 
 For Codex, observed open main or child work in the selected log keeps this
 precondition busy even if a parent `turn-ended` signal has arrived. Claude native
-Working/Waiting applies the same veto, including assigned children and background shell work.
+Working/Waiting applies the same veto, including assigned children. A Claude pane whose
+turn has ended while background shells still run is `idle` and accepts a dispatch.
 
 The coordinator waits by exact id:
 
