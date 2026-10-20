@@ -93,6 +93,7 @@ final class WorktreeTerminalManager {
     self.codexVersionQuery = codexVersionQuery
     self.hookResourcesProvider = hookResourcesProvider
     self.forwardingRecordBaseDirectory = forwardingRecordBaseDirectory
+    configureDispatchEvidence()
     // A remembered size equal to the config's size means "follow the config".
     // Builds that read the config size as 0 saved such sizes, so clear them here
     // and send the cleared value to Settings.
@@ -595,7 +596,7 @@ final class WorktreeTerminalManager {
   @discardableResult
   func recordAgentNativeHook(_ input: AgentNativeHookInput, caller: CallerPane) -> Bool {
     guard containsSurface(caller.surfaceID) else { return false }
-    refreshEvidenceEpoch(surfaceID: caller.surfaceID)
+    let evidence = refreshEvidenceEpoch(surfaceID: caller.surfaceID)
     switch agentObservationStore.recordManagedHook(
       input,
       callerAncestry: caller.processAncestry,
@@ -604,6 +605,10 @@ final class WorktreeTerminalManager {
     case .rejected:
       return false
     case .pending:
+      terminalLogger.debug(
+        "Managed hook deferred runtime=\(input.runtime.rawValue) pane=\(caller.surfaceID) "
+          + "hookSession=\(input.signal.sessionID) detectedSession=\(evidence.sessionID ?? "unknown")"
+      )
       return true
     case .accepted(let signal, let evidenceEpoch):
       noteDispatchEvidence(signal, surfaceID: caller.surfaceID, evidenceEpoch: evidenceEpoch)
@@ -620,12 +625,13 @@ final class WorktreeTerminalManager {
     let evidence = currentAgentEvidence(surfaceID: surfaceID)
     // Managed hooks belong to a local launch; an agent on another origin retires them
     // with the rest of the local evidence.
-    if evidence.isRemote { revokeManagedHook(surfaceID: surfaceID, state: nil) }
+    if evidence.isRemote { revokeManagedHook(surfaceID: surfaceID, state: nil, invalidatingEvidence: true) }
     handleEvidenceEpochUpdate(
       agentObservationStore.updateEvidenceEpoch(
         surfaceID: surfaceID,
         processGeneration: evidence.generation,
-        sessionID: evidence.sessionID
+        sessionID: evidence.sessionID,
+        isRemote: evidence.isRemote
       ),
       surfaceID: surfaceID
     )
@@ -640,10 +646,19 @@ final class WorktreeTerminalManager {
       guard let epoch = agentObservationStore.currentEvidenceEpoch(surfaceID: surfaceID) else {
         continue
       }
-      noteDispatchEvidence(signal, surfaceID: surfaceID, evidenceEpoch: epoch)
+      noteDispatchEvidence(signal, surfaceID: surfaceID, evidenceEpoch: epoch, observedAt: signal.timestamp)
     }
     for record in update.revokedForwardingRecords {
       retireForwardingRecord(record)
+    }
+  }
+
+  private func configureDispatchEvidence() {
+    agentObservationStore.onEvidenceInvalidated = { [weak self] surfaceID, epoch in
+      self?.agentDispatchStore.invalidateEvidence(surfaceID: surfaceID, evidenceEpoch: epoch)
+    }
+    agentDispatchStore.refreshEvidence = { [weak self] surfaceID in
+      _ = self?.refreshEvidenceEpoch(surfaceID: surfaceID)
     }
   }
 
@@ -654,26 +669,30 @@ final class WorktreeTerminalManager {
   private func noteDispatchEvidence(
     _ signal: AgentSignal,
     surfaceID: UUID,
-    evidenceEpoch: UUID
+    evidenceEpoch: UUID,
+    observedAt: Date? = nil
   ) {
     switch signal.kind {
     case .turnEnded:
       agentDispatchStore.noteTerminalEvidence(
         surfaceID: surfaceID,
         evidenceEpoch: evidenceEpoch,
-        evidence: .turnEnded
+        evidence: .turnEnded,
+        observedAt: observedAt
       )
     case .needsInput:
       agentDispatchStore.noteTerminalEvidence(
         surfaceID: surfaceID,
         evidenceEpoch: evidenceEpoch,
-        evidence: .needsInput
+        evidence: .needsInput,
+        observedAt: observedAt
       )
     case .sessionEnd:
       agentDispatchStore.noteTerminalEvidence(
         surfaceID: surfaceID,
         evidenceEpoch: evidenceEpoch,
-        evidence: .sessionEnd
+        evidence: .sessionEnd,
+        observedAt: observedAt
       )
     case .sessionStart, .progress:
       agentDispatchStore.noteActivity(surfaceID: surfaceID, evidenceEpoch: evidenceEpoch)
@@ -778,6 +797,10 @@ final class WorktreeTerminalManager {
     }
     guard snapshot.record.state == .pending else {
       throw AgentDispatchStoreError.alreadyTerminal
+    }
+    // Starting an epoch retires the pane's evidence, so reject a second assignment first.
+    guard agentDispatchStore.pendingSnapshot(surfaceID: surfaceID) == nil else {
+      throw AgentDispatchStoreError.surfacePending
     }
     let evidenceEpoch: UUID
     if agentObservationStore.hasManagedHook(surfaceID: surfaceID) {
@@ -904,6 +927,10 @@ final class WorktreeTerminalManager {
 
   func observeAgentDispatch(dispatchID: String) throws -> AgentDispatchObservationStream {
     try agentDispatchStore.observe(dispatchID: dispatchID)
+  }
+
+  func revalidateAgentDispatch(_ event: AgentDispatchObservation) -> AgentDispatchObservation {
+    agentDispatchStore.revalidate(event)
   }
 
   func agentDispatchSubscriberCount(dispatchID: String) -> Int {
@@ -1232,8 +1259,15 @@ final class WorktreeTerminalManager {
     }
   }
 
-  private func revokeManagedHook(surfaceID: UUID, state: WorktreeTerminalState?) {
-    guard let record = agentObservationStore.revokeManagedHook(surfaceID: surfaceID) else { return }
+  private func revokeManagedHook(
+    surfaceID: UUID,
+    state: WorktreeTerminalState?,
+    invalidatingEvidence: Bool = false
+  ) {
+    guard
+      let record = agentObservationStore.revokeManagedHook(
+        surfaceID: surfaceID, invalidatingEvidence: invalidatingEvidence)
+    else { return }
     if state?.isRetainedForUndo(surfaceID) == true {
       deferredForwardingRecords[surfaceID] = record
     } else {
@@ -1646,6 +1680,7 @@ final class WorktreeTerminalManager {
       self.hookResourcesProvider = { nil }
       self.forwardingRecordBaseDirectory = ProwlPaths.agentHookForwardingDirectory
       self.closeUndoStack = TerminalCloseUndoStack(timeout: .zero)
+      configureDispatchEvidence()
     }
   #endif
 }

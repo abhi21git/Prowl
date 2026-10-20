@@ -445,6 +445,17 @@ Abandoning a record that already completed, was abandoned, or is gone fails with
 moment after the close, so a wait issued in that same instant may still report
 `DISPATCH_INCOMPLETE`; re-run it.
 
+Managed Codex turn-end hooks must match the independently detected pane session before
+resolving a dispatch wait. Hooks awaiting that confirmation remain pending in a bounded
+buffer of the eight most recent Codex hooks; newer hooks replace the oldest when full.
+Debug logs identify the hook session and detected session when a hook is deferred. A hook that
+Prowl received before the dispatch was issued cannot resolve it. A replacement session or
+process clears old signal-derived wait evidence; a stale diagnostic signal alone cannot end
+the wait. An agent that exits keeps its evidence, so a turn end or session end just before the
+exit still reports `DISPATCH_INCOMPLETE` or `AGENT_GONE`. A matching completion receipt still
+resolves the original dispatch. While detection cannot identify the Codex session with
+confidence, its hooks stay pending, and a wait without a receipt ends at its timeout.
+
 For state observation rather than task proof, wait on a pane condition:
 
 ```bash
