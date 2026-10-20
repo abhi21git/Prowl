@@ -630,7 +630,8 @@ final class WorktreeTerminalManager {
       agentObservationStore.updateEvidenceEpoch(
         surfaceID: surfaceID,
         processGeneration: evidence.generation,
-        sessionID: evidence.sessionID
+        sessionID: evidence.sessionID,
+        isRemote: evidence.isRemote
       ),
       surfaceID: surfaceID
     )

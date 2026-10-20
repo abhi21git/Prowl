@@ -70,6 +70,35 @@ struct AgentObservationTests {
     }
   }
 
+  @Test(arguments: [AgentSignal.Kind.needsInput, .sessionEnd])
+  func remoteReplacementInvalidatesUnmanagedDispatchEvidence(kind: AgentSignal.Kind) async throws {
+    let clock = TestClock()
+    let dispatchStore = AgentDispatchStore(coalescingClock: clock)
+    let fixture = makeFixture(dispatchStore: dispatchStore)
+    let generation = try runningCodexPane(fixture, sessionID: "worker-1")
+    let target = dispatchTarget(fixture)
+    let dispatch = try fixture.manager.issueAgentDispatch(boundTo: target)
+    let signal = AgentSignal(
+      kind: kind, source: .cooperativeCLI, confidence: .exact,
+      timestamp: Date(), sessionID: "worker-1", detail: nil, claimedOrigin: nil)
+    let caller = CallerPane(
+      worktreeID: target.worktreeID, surfaceID: fixture.surfaceID, processAncestry: [generation])
+    #expect(fixture.manager.recordAgentSignal(signal, caller: caller) == .recorded(binding: .current))
+
+    // The pane now runs an agent on another host: a replacement, not the local agent exiting.
+    let remote = ProcessRef.remote(
+      RemoteProcessRef(
+        connection: ConnectionKey(user: "onevcat", hostname: "mini.local"), bootID: "boot", pid: getpid(),
+        startToken: "t1"))
+    fixture.state.surfaceAgentStates[fixture.surfaceID] = PaneAgentState(
+      detectedAgent: .codex, agentProcess: remote, launchProcess: remote, state: .working)
+    #expect(fixture.manager.revalidateAgentDispatch(.needsInput(dispatch)) == .snapshot(dispatch))
+    await registerCoalescingTask()
+    await clock.advance(by: .milliseconds(300))
+    await registerCoalescingTask()
+    #expect(dispatchStore.snapshot(dispatchID: dispatch.record.id)?.record.state == .pending)
+  }
+
   @Test func rejectedBindingKeepsTheSurfacePendingDispatchEvidence() throws {
     let fixture = makeFixture()
     let generation = try runningCodexPane(fixture, sessionID: "worker-1")

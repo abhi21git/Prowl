@@ -58,8 +58,9 @@ process. The wait stayed pending until its timeout instead of returning `AGENT_G
 or `DISPATCH_INCOMPLETE`.
 
 - Only a replacement invalidates: a new non-nil process generation, a detector-confirmed
-  session change, a new dispatch epoch, or a remote origin. Loss still rotates the
-  observation epoch, so a later agent cannot add evidence to the old binding.
+  session change, a new dispatch epoch, or a remote origin. A remote origin counts with
+  or without a managed hook, although no local generation remains. Loss still rotates
+  the observation epoch, so a later agent cannot add evidence to the old binding.
 - A pending hook keeps the time Prowl received it. Replay activates it with that time,
   and the dispatch store ignores terminal evidence observed before the record was
   issued. A turn end buffered before the dispatch therefore cannot end it.

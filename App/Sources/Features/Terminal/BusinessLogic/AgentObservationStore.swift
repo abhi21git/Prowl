@@ -477,7 +477,8 @@ final class AgentObservationStore {
   func updateEvidenceEpoch(
     surfaceID: UUID,
     processGeneration: LocalProcessGeneration?,
-    sessionID: String?
+    sessionID: String?,
+    isRemote: Bool = false
   ) -> AgentEvidenceEpochUpdate {
     var record = records[surfaceID] ?? SurfaceRecord()
     if record.managedHook != nil,
@@ -513,7 +514,8 @@ final class AgentObservationStore {
     var update = AgentEvidenceEpochUpdate()
     if processChanged || sessionChanged {
       // An exited agent leaves its evidence valid; only a replacement invalidates it.
-      if sessionChanged || processGeneration != nil {
+      // An agent on another origin replaces the local one even though no local generation remains.
+      if sessionChanged || processGeneration != nil || isRemote {
         onEvidenceInvalidated?(surfaceID, record.evidenceEpoch)
       }
       record.evidenceEpoch = UUID()
