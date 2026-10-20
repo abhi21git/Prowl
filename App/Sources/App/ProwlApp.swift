@@ -932,6 +932,7 @@ struct ProwlApp: App {
           return .failure(.notFound)
         }
       },
+      revalidateDispatch: { terminalManager.revalidateAgentDispatch($0) },
       observeCondition: { surfaceID in
         terminalManager.observeAgentState(surfaceID: surfaceID)
       },

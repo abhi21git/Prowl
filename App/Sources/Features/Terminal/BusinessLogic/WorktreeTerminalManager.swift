@@ -93,6 +93,7 @@ final class WorktreeTerminalManager {
     self.codexVersionQuery = codexVersionQuery
     self.hookResourcesProvider = hookResourcesProvider
     self.forwardingRecordBaseDirectory = forwardingRecordBaseDirectory
+    configureDispatchEvidence()
     // A remembered size equal to the config's size means "follow the config".
     // Builds that read the config size as 0 saved such sizes, so clear them here
     // and send the cleared value to Settings.
@@ -647,6 +648,15 @@ final class WorktreeTerminalManager {
     }
   }
 
+  private func configureDispatchEvidence() {
+    agentObservationStore.onEvidenceInvalidated = { [weak self] surfaceID, epoch in
+      self?.agentDispatchStore.invalidateEvidence(surfaceID: surfaceID, evidenceEpoch: epoch)
+    }
+    agentDispatchStore.refreshEvidence = { [weak self] surfaceID in
+      _ = self?.refreshEvidenceEpoch(surfaceID: surfaceID)
+    }
+  }
+
   private func retireForwardingRecord(_ record: CodexForwardingRecord) {
     codexForwardingRecordStore?.retire(record)
   }
@@ -904,6 +914,10 @@ final class WorktreeTerminalManager {
 
   func observeAgentDispatch(dispatchID: String) throws -> AgentDispatchObservationStream {
     try agentDispatchStore.observe(dispatchID: dispatchID)
+  }
+
+  func revalidateAgentDispatch(_ event: AgentDispatchObservation) -> AgentDispatchObservation {
+    agentDispatchStore.revalidate(event)
   }
 
   func agentDispatchSubscriberCount(dispatchID: String) -> Int {
@@ -1646,6 +1660,7 @@ final class WorktreeTerminalManager {
       self.hookResourcesProvider = { nil }
       self.forwardingRecordBaseDirectory = ProwlPaths.agentHookForwardingDirectory
       self.closeUndoStack = TerminalCloseUndoStack(timeout: .zero)
+      configureDispatchEvidence()
     }
   #endif
 }

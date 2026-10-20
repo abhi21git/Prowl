@@ -442,6 +442,11 @@ Abandoning a record that already completed, was abandoned, or is gone fails with
 moment after the close, so a wait issued in that same instant may still report
 `DISPATCH_INCOMPLETE`; re-run it.
 
+Managed Codex turn-end hooks must match the independently detected pane session before
+resolving a dispatch wait. Hooks awaiting that confirmation remain pending. A session or
+process change clears old signal-derived wait evidence; a stale diagnostic signal alone
+cannot end the wait. A matching completion receipt still resolves the original dispatch.
+
 For state observation rather than task proof, wait on a pane condition:
 
 ```bash

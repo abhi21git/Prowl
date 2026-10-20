@@ -7,6 +7,91 @@ import Testing
 
 @MainActor
 struct AgentWaitCommandHandlerTests {
+  @Test func receiptDecisionStopsTimeoutBeforeScreenStabilization() async throws {
+    let clock = TestClock()
+    let pending = snapshot(.pending(id: "d1", createdAt: Self.start))
+    let completed = snapshot(
+      .completed(
+        id: "d1", outcome: .succeeded, summary: "Done", createdAt: Self.start, completedAt: Self.start))
+    var screenReads = 0
+    let handler = AgentWaitCommandHandler(
+      observeDispatch: { _ in
+        .success(
+          AgentDispatchObservationStream { continuation in
+            continuation.yield(.snapshot(pending))
+            continuation.yield(.changed(completed))
+            continuation.finish()
+          })
+      },
+      screenProvider: { _ in
+        screenReads += 1
+        return "Frame \(screenReads)"
+      },
+      clock: clock,
+      now: { Self.start }
+    )
+    let task = Task {
+      await handler.handle(
+        envelope: CommandEnvelope(
+          output: .json,
+          command: .agentsWait(.init(mode: .dispatch, dispatchID: "d1", timeoutSeconds: 1, includeScreenLines: 10))))
+    }
+    let response = await drive(task, clock)
+    #expect(response.ok)
+    #expect(screenReads == 11)
+  }
+
+  @Test func staleBufferedEvidenceIsIgnoredUntilAReceiptArrives() async throws {
+    let pending = snapshot(.pending(id: "d1", createdAt: Self.start))
+    let completed = snapshot(
+      .completed(
+        id: "d1", outcome: .succeeded, summary: "Done", createdAt: Self.start, completedAt: Self.start))
+    var reads = 0
+    let handler = AgentWaitCommandHandler(
+      observeDispatch: { _ in
+        .success(
+          AgentDispatchObservationStream { continuation in
+            continuation.yield(.snapshot(pending))
+            continuation.yield(.incomplete(pending))
+            continuation.yield(.changed(completed))
+            continuation.finish()
+          })
+      },
+      revalidateDispatch: { event in
+        reads += 1
+        if case .incomplete = event { return .snapshot(pending) }
+        return event
+      }
+    )
+    let response = await handler.handle(envelope: waitDispatch("d1"))
+    #expect(response.ok)
+    #expect(reads == 3)
+  }
+
+  @Test func diagnosticRefreshInvalidatesEvidenceBeforeExitDecision() async {
+    let clock = TestClock()
+    let pending = snapshot(.pending(id: "d1", createdAt: Self.start))
+    var invalidated = false
+    let handler = AgentWaitCommandHandler(
+      observeDispatch: { _ in
+        .success(
+          AgentDispatchObservationStream { continuation in
+            continuation.yield(.incomplete(pending))
+          })
+      },
+      revalidateDispatch: { event in invalidated ? .snapshot(pending) : event },
+      signalsProvider: { _ in
+        invalidated = true
+        return .empty
+      },
+      clock: clock,
+      now: { Self.start }
+    )
+    let task = Task { await handler.handle(envelope: waitDispatch("d1")) }
+    let response = await drive(task, clock)
+    #expect(response.error?.code == CLIErrorCode.waitTimeout)
+  }
+
   @Test func succeededDispatchReturnsReceiptAndFailedReceiptIsStructuredError() async throws {
     let succeeded = snapshot(
       .completed(

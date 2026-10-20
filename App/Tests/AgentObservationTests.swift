@@ -7,6 +7,35 @@ import Testing
 
 @MainActor
 struct AgentObservationTests {
+  @Test func dispatchRevalidationRefreshesDetectorAndClearsOldSessionEvidence() throws {
+    let fixture = makeFixture()
+    let generation = LocalProcessGeneration(
+      pid: getpid(), startedAt: try #require(ProcessDetection.processStartDate(pid: getpid())))
+    var pane = PaneAgentState(detectedAgent: .codex, agentProcess: .local(getpid()), state: .working)
+    pane.session = AgentSession(id: "worker-1", transcriptPath: nil, source: .openFile, confidence: .exact)
+    fixture.state.surfaceAgentStates[fixture.surfaceID] = pane
+    let target = TabResolvedTarget(
+      worktreeID: "/tmp/agent-observation", worktreeName: "agent-observation",
+      worktreePath: "/tmp/agent-observation", worktreeRootPath: "/tmp/agent-observation", worktreeKind: "git",
+      tabID: fixture.tabID.rawValue.uuidString, tabTitle: "Codex", tabSelected: true,
+      paneID: fixture.surfaceID.uuidString, paneTitle: "Codex", paneCWD: "/tmp/agent-observation", paneFocused: true)
+    let dispatch = try fixture.manager.issueAgentDispatch(boundTo: target)
+    let signal = AgentSignal(
+      kind: .needsInput, source: .cooperativeCLI, confidence: .exact,
+      timestamp: Date(), sessionID: "worker-1", detail: nil, claimedOrigin: nil)
+    let caller = CallerPane(
+      worktreeID: target.worktreeID, surfaceID: fixture.surfaceID, processAncestry: [generation])
+    #expect(fixture.manager.recordAgentSignal(signal, caller: caller) == .recorded(binding: .current))
+    #expect(fixture.manager.revalidateAgentDispatch(.needsInput(dispatch)) == .needsInput(dispatch))
+
+    // No publication: the wait consumer itself must refresh the changed detector state.
+    pane.session = AgentSession(id: "worker-2", transcriptPath: nil, source: .openFile, confidence: .exact)
+    fixture.state.surfaceAgentStates[fixture.surfaceID] = pane
+    #expect(fixture.manager.revalidateAgentDispatch(.needsInput(dispatch)) == .snapshot(dispatch))
+    #expect(
+      fixture.manager.agentEvidenceEpochForTesting(surfaceID: fixture.surfaceID) != dispatch.binding?.evidenceEpoch)
+  }
+
   @Test func liveShellStartsWithAtomicEmptySnapshotAndReplaysLatestSignal() async throws {
     let fixture = makeFixture()
     let firstStream = fixture.manager.observeAgentState(surfaceID: fixture.surfaceID)
