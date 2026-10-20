@@ -48,6 +48,30 @@ completion receipt remains independent of this buffer.
 Deferred-hook diagnostics record the pane, hook session and independently detected
 session at ingress. They do not log the launch token or repeat on detector replay.
 
+## Loss is not replacement
+
+The final takeover review found that the invalidation also fired when the agent went
+away: a process generation that becomes nil, or the agent entry removal that revokes
+the managed hook. A `.gone(.sessionEnd)` or `.incomplete` candidate then lost its
+evidence inside the 300 ms window, because the commit-time refresh saw the exited
+process. The wait stayed pending until its timeout instead of returning `AGENT_GONE`
+or `DISPATCH_INCOMPLETE`.
+
+- Only a replacement invalidates: a new non-nil process generation, a detector-confirmed
+  session change, a new dispatch epoch, or a remote origin. Loss still rotates the
+  observation epoch, so a later agent cannot add evidence to the old binding.
+- A pending hook keeps the time Prowl received it. Replay activates it with that time,
+  and the dispatch store ignores terminal evidence observed before the record was
+  issued. A turn end buffered before the dispatch therefore cannot end it.
+- `bindAgentDispatch` rejects a second assignment to a pane with a pending record
+  before it starts the new epoch, so the rejected bind does not clear the pending
+  record's evidence.
+
+Known limit: when the detector cannot resolve the Codex session at `exact` or `high`
+confidence (several open rollout files, or the `/tmp` cwd case of #897), Codex hooks
+stay pending. A wait without a receipt then ends at its timeout rather than with
+`DISPATCH_INCOMPLETE`. This is the cost of requiring independent confirmation.
+
 ## Verification
 
 - Source-level reproduction confirmed the foreign first-hook and stale-evidence
@@ -83,3 +107,4 @@ session at ingress. They do not log the launch token or repeat on detector repla
 
 - #944
 - #945 (original contribution by philo-veritas)
+- #948 (takeover)

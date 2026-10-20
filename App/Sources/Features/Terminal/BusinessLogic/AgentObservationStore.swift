@@ -14,6 +14,7 @@ private struct AgentSignalChannelRecord {
 private struct PendingManagedHookSignal {
   let input: AgentNativeHookInput
   let callerAncestry: [LocalProcessGeneration]
+  let receivedAt: Date
 }
 
 private struct ManagedHookRegistrationRecord {
@@ -86,7 +87,11 @@ final class AgentObservationStore {
     var revision: UInt64 = 0
     var subscribers: [UUID: AgentObservationStream.Continuation] = [:]
 
-    mutating func bufferManagedHook(_ input: AgentNativeHookInput, callerAncestry: [LocalProcessGeneration]) {
+    mutating func bufferManagedHook(
+      _ input: AgentNativeHookInput,
+      callerAncestry: [LocalProcessGeneration],
+      receivedAt: Date
+    ) {
       guard var managed = managedHook else { return }
       if managed.pendingSignals.count == 8 {
         // Codex has only turn-end hooks. Keep recent evidence while detection lags;
@@ -94,7 +99,8 @@ final class AgentObservationStore {
         guard managed.launch.runtime == .codex else { return }
         managed.pendingSignals.removeFirst()
       }
-      managed.pendingSignals.append(PendingManagedHookSignal(input: input, callerAncestry: callerAncestry))
+      managed.pendingSignals.append(
+        PendingManagedHookSignal(input: input, callerAncestry: callerAncestry, receivedAt: receivedAt))
       managedHook = managed
     }
 
@@ -291,9 +297,11 @@ final class AgentObservationStore {
     records[surfaceID]?.managedHook != nil
   }
 
-  func revokeManagedHook(surfaceID: UUID) -> CodexForwardingRecord? {
+  /// Retires the launch's hook channel. The agent going away does not invalidate the
+  /// evidence it already produced; only a replacement (`invalidatingEvidence`) does.
+  func revokeManagedHook(surfaceID: UUID, invalidatingEvidence: Bool = false) -> CodexForwardingRecord? {
     guard var record = records[surfaceID], let managed = record.managedHook else { return nil }
-    onEvidenceInvalidated?(surfaceID, record.evidenceEpoch)
+    if invalidatingEvidence { onEvidenceInvalidated?(surfaceID, record.evidenceEpoch) }
     record.managedHook = nil
     record.evidenceEpoch = UUID()
     record.processGeneration = nil
@@ -308,11 +316,26 @@ final class AgentObservationStore {
     return managed.launch.forwardingRecord
   }
 
+  private func deferManagedHook(
+    _ input: AgentNativeHookInput,
+    _ callerAncestry: [LocalProcessGeneration],
+    _ receivedAt: Date,
+    record: SurfaceRecord,
+    surfaceID: UUID
+  ) -> ManagedHookRecordResult {
+    var record = record
+    record.bufferManagedHook(input, callerAncestry: callerAncestry, receivedAt: receivedAt)
+    records[surfaceID] = record
+    return .pending
+  }
+
   func recordManagedHook(
     _ input: AgentNativeHookInput,
     callerAncestry: [LocalProcessGeneration],
-    surfaceID: UUID
+    surfaceID: UUID,
+    receivedAt: Date? = nil
   ) -> ManagedHookRecordResult {
+    let receivedAt = receivedAt ?? now()
     guard input.validationErrorMessage == nil,
       var record = records[surfaceID],
       var managed = record.managedHook,
@@ -326,9 +349,7 @@ final class AgentObservationStore {
     }
     guard let generation = managed.processGeneration ?? record.processGeneration else {
       guard record.awaitingFirstProcessGeneration else { return .rejected }
-      record.bufferManagedHook(input, callerAncestry: callerAncestry)
-      records[surfaceID] = record
-      return .pending
+      return deferManagedHook(input, callerAncestry, receivedAt, record: record, surfaceID: surfaceID)
     }
     guard callerAncestry.contains(generation), managed.processGeneration == generation else {
       observationLogger.debug(
@@ -367,9 +388,7 @@ final class AgentObservationStore {
     if input.runtime == .codex, record.detectedSessionID != input.signal.sessionID {
       // The detector may lag a real thread switch. Defer rather than promote a
       // thread solely because it inherited this launch's notifier and ancestry.
-      record.bufferManagedHook(input, callerAncestry: callerAncestry)
-      records[surfaceID] = record
-      return .pending
+      return deferManagedHook(input, callerAncestry, receivedAt, record: record, surfaceID: surfaceID)
     }
 
     if let currentSession = managed.sessionID,
@@ -411,7 +430,7 @@ final class AgentObservationStore {
       kind: signalKind(input.signal.event),
       source: .hook(runtime: runtime, event: input.signal.nativeEvent),
       confidence: .exact,
-      timestamp: now(),
+      timestamp: receivedAt,
       sessionID: input.signal.sessionID,
       detail: input.signal.detail,
       claimedOrigin: nil
@@ -493,7 +512,10 @@ final class AgentObservationStore {
       && record.sessionID != acceptedSessionID
     var update = AgentEvidenceEpochUpdate()
     if processChanged || sessionChanged {
-      onEvidenceInvalidated?(surfaceID, record.evidenceEpoch)
+      // An exited agent leaves its evidence valid; only a replacement invalidates it.
+      if sessionChanged || processGeneration != nil {
+        onEvidenceInvalidated?(surfaceID, record.evidenceEpoch)
+      }
       record.evidenceEpoch = UUID()
       record.channels.removeAll()
       record.clearCurrentSignals()
@@ -539,7 +561,8 @@ final class AgentObservationStore {
       if case .accepted(let signal, _) = recordManagedHook(
         pendingSignal.input,
         callerAncestry: pendingSignal.callerAncestry,
-        surfaceID: surfaceID
+        surfaceID: surfaceID,
+        receivedAt: pendingSignal.receivedAt
       ) {
         update.activatedSignals.append(signal)
       }

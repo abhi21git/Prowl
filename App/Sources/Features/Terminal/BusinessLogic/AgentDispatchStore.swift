@@ -411,12 +411,15 @@ final class AgentDispatchStore {
   func noteTerminalEvidence(
     surfaceID: UUID,
     evidenceEpoch: UUID,
-    evidence: AgentDispatchTerminalEvidence
+    evidence: AgentDispatchTerminalEvidence,
+    observedAt: Date? = nil
   ) {
     let dispatchIDs = entries.compactMap { dispatchID, entry in
       entry.snapshot.record.state == .pending
         && entry.snapshot.binding?.surfaceID == surfaceID
         && entry.snapshot.binding?.evidenceEpoch == evidenceEpoch
+        // A replayed hook can predate the dispatch; it cannot settle work issued after it.
+        && observedAt.map { $0 >= entry.snapshot.record.createdAt } ?? true
         ? dispatchID : nil
     }
     for dispatchID in dispatchIDs {

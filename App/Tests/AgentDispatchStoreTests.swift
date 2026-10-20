@@ -92,6 +92,27 @@ struct AgentDispatchStoreTests {
     fixture.store.refreshEvidence = { _ in }
   }
 
+  @Test func evidenceObservedBeforeIssuanceCannotSettleTheDispatch() async throws {
+    let clock = TestClock()
+    let fixture = try makeBoundStore(id: "d1", clock: clock)
+    let pending = try #require(fixture.store.snapshot(dispatchID: "d1"))
+    fixture.store.noteTerminalEvidence(
+      surfaceID: fixture.binding.surfaceID, evidenceEpoch: fixture.binding.evidenceEpoch,
+      evidence: .turnEnded, observedAt: Self.start.addingTimeInterval(-1))
+    await registerCoalescingTask()
+    await clock.advance(by: .milliseconds(300))
+    await registerCoalescingTask()
+    #expect(fixture.store.revalidate(.incomplete(pending)) == .snapshot(pending))
+
+    fixture.store.noteTerminalEvidence(
+      surfaceID: fixture.binding.surfaceID, evidenceEpoch: fixture.binding.evidenceEpoch,
+      evidence: .turnEnded, observedAt: Self.start)
+    await registerCoalescingTask()
+    await clock.advance(by: .milliseconds(300))
+    await registerCoalescingTask()
+    #expect(fixture.store.revalidate(.incomplete(pending)) == .incomplete(pending))
+  }
+
   @Test func issuanceBindingAndImmutableTargetSurviveCompletion() throws {
     let store = makeStore(ids: ["d1"])
     let issued = try store.issue()

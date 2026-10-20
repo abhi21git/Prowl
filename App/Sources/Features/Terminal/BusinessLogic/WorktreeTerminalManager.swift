@@ -625,7 +625,7 @@ final class WorktreeTerminalManager {
     let evidence = currentAgentEvidence(surfaceID: surfaceID)
     // Managed hooks belong to a local launch; an agent on another origin retires them
     // with the rest of the local evidence.
-    if evidence.isRemote { revokeManagedHook(surfaceID: surfaceID, state: nil) }
+    if evidence.isRemote { revokeManagedHook(surfaceID: surfaceID, state: nil, invalidatingEvidence: true) }
     handleEvidenceEpochUpdate(
       agentObservationStore.updateEvidenceEpoch(
         surfaceID: surfaceID,
@@ -645,7 +645,7 @@ final class WorktreeTerminalManager {
       guard let epoch = agentObservationStore.currentEvidenceEpoch(surfaceID: surfaceID) else {
         continue
       }
-      noteDispatchEvidence(signal, surfaceID: surfaceID, evidenceEpoch: epoch)
+      noteDispatchEvidence(signal, surfaceID: surfaceID, evidenceEpoch: epoch, observedAt: signal.timestamp)
     }
     for record in update.revokedForwardingRecords {
       retireForwardingRecord(record)
@@ -668,26 +668,30 @@ final class WorktreeTerminalManager {
   private func noteDispatchEvidence(
     _ signal: AgentSignal,
     surfaceID: UUID,
-    evidenceEpoch: UUID
+    evidenceEpoch: UUID,
+    observedAt: Date? = nil
   ) {
     switch signal.kind {
     case .turnEnded:
       agentDispatchStore.noteTerminalEvidence(
         surfaceID: surfaceID,
         evidenceEpoch: evidenceEpoch,
-        evidence: .turnEnded
+        evidence: .turnEnded,
+        observedAt: observedAt
       )
     case .needsInput:
       agentDispatchStore.noteTerminalEvidence(
         surfaceID: surfaceID,
         evidenceEpoch: evidenceEpoch,
-        evidence: .needsInput
+        evidence: .needsInput,
+        observedAt: observedAt
       )
     case .sessionEnd:
       agentDispatchStore.noteTerminalEvidence(
         surfaceID: surfaceID,
         evidenceEpoch: evidenceEpoch,
-        evidence: .sessionEnd
+        evidence: .sessionEnd,
+        observedAt: observedAt
       )
     case .sessionStart, .progress:
       agentDispatchStore.noteActivity(surfaceID: surfaceID, evidenceEpoch: evidenceEpoch)
@@ -792,6 +796,10 @@ final class WorktreeTerminalManager {
     }
     guard snapshot.record.state == .pending else {
       throw AgentDispatchStoreError.alreadyTerminal
+    }
+    // Starting an epoch retires the pane's evidence, so reject a second assignment first.
+    guard agentDispatchStore.pendingSnapshot(surfaceID: surfaceID) == nil else {
+      throw AgentDispatchStoreError.surfacePending
     }
     let evidenceEpoch: UUID
     if agentObservationStore.hasManagedHook(surfaceID: surfaceID) {
@@ -1250,8 +1258,15 @@ final class WorktreeTerminalManager {
     }
   }
 
-  private func revokeManagedHook(surfaceID: UUID, state: WorktreeTerminalState?) {
-    guard let record = agentObservationStore.revokeManagedHook(surfaceID: surfaceID) else { return }
+  private func revokeManagedHook(
+    surfaceID: UUID,
+    state: WorktreeTerminalState?,
+    invalidatingEvidence: Bool = false
+  ) {
+    guard
+      let record = agentObservationStore.revokeManagedHook(
+        surfaceID: surfaceID, invalidatingEvidence: invalidatingEvidence)
+    else { return }
     if state?.isRetainedForUndo(surfaceID) == true {
       deferredForwardingRecords[surfaceID] = record
     } else {

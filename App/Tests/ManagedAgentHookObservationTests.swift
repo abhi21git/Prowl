@@ -70,6 +70,47 @@ struct ManagedAgentHookObservationTests {
     #expect(store.currentEvidenceEpoch(surfaceID: surfaceID) != oldEpoch)
   }
 
+  @Test func agentLossDoesNotInvalidateDispatchEvidence() {
+    let now = Date(timeIntervalSince1970: 100)
+    let generation = LocalProcessGeneration(pid: 900, startedAt: now)
+    let store = AgentObservationStore(bufferCapacity: 8, now: { now })
+    let detectedSurface = UUID()
+    _ = store.updateEvidenceEpoch(surfaceID: detectedSurface, processGeneration: generation, sessionID: "session-1")
+    let managedSurface = UUID()
+    let registration = makeRegistration(runtime: .claude, cwd: "/tmp/project")
+    _ = store.registerManagedHook(registration, surfaceID: managedSurface)
+    _ = store.updateEvidenceEpoch(surfaceID: managedSurface, processGeneration: generation, sessionID: "session-1")
+    var invalidations: [UUID] = []
+    store.onEvidenceInvalidated = { surfaceID, _ in invalidations.append(surfaceID) }
+
+    // The agent exits or its entry goes away: the evidence it produced stays valid.
+    _ = store.updateEvidenceEpoch(surfaceID: detectedSurface, processGeneration: nil, sessionID: nil)
+    _ = store.revokeManagedHook(surfaceID: managedSurface)
+    #expect(invalidations.isEmpty)
+
+    // A replacement process still retires whatever epoch is current.
+    let replacement = LocalProcessGeneration(pid: 901, startedAt: now)
+    _ = store.updateEvidenceEpoch(surfaceID: detectedSurface, processGeneration: replacement, sessionID: nil)
+    #expect(invalidations == [detectedSurface])
+  }
+
+  @Test func replayedCodexHookKeepsItsReceiptTime() {
+    let clock = MutableDate(Date(timeIntervalSince1970: 100))
+    let generation = LocalProcessGeneration(pid: 900, startedAt: clock.value)
+    let store = AgentObservationStore(bufferCapacity: 8, now: { clock.value })
+    let surfaceID = UUID()
+    let registration = makeRegistration(runtime: .codex, cwd: "/tmp/project")
+    _ = store.registerManagedHook(registration, surfaceID: surfaceID)
+    _ = store.updateEvidenceEpoch(surfaceID: surfaceID, processGeneration: generation, sessionID: nil)
+    let hook = makeInput(
+      runtime: .codex, token: registration.token, nativeEvent: "agent-turn-complete", cwd: "/tmp/project")
+    #expect(store.recordManagedHook(hook, callerAncestry: [generation], surfaceID: surfaceID) == .pending)
+
+    clock.value = Date(timeIntervalSince1970: 200)
+    let update = store.updateEvidenceEpoch(surfaceID: surfaceID, processGeneration: generation, sessionID: "session-1")
+    #expect(update.activatedSignals.map(\.timestamp) == [Date(timeIntervalSince1970: 100)])
+  }
+
   @Test func firstCodexHookCannotReplaceIndependentlyDetectedThread() throws {
     let now = Date(timeIntervalSince1970: 100)
     let store = AgentObservationStore(bufferCapacity: 8, now: { now })
@@ -845,5 +886,14 @@ extension ManagedHookRecordResult {
   fileprivate var isAccepted: Bool {
     if case .accepted = self { return true }
     return false
+  }
+}
+
+@MainActor
+private final class MutableDate {
+  var value: Date
+
+  init(_ value: Date) {
+    self.value = value
   }
 }

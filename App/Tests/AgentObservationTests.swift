@@ -1,3 +1,4 @@
+import Clocks
 import Foundation
 import GhosttyKit
 import ProwlCLIShared
@@ -34,6 +35,58 @@ struct AgentObservationTests {
     #expect(fixture.manager.revalidateAgentDispatch(.needsInput(dispatch)) == .snapshot(dispatch))
     #expect(
       fixture.manager.agentEvidenceEpochForTesting(surfaceID: fixture.surfaceID) != dispatch.binding?.evidenceEpoch)
+  }
+
+  @Test(arguments: [AgentSignal.Kind.turnEnded, .sessionEnd])
+  func agentExitKeepsTerminalEvidenceForItsDispatch(kind: AgentSignal.Kind) async throws {
+    let clock = TestClock()
+    let dispatchStore = AgentDispatchStore(coalescingClock: clock)
+    let fixture = makeFixture(dispatchStore: dispatchStore)
+    let generation = try runningCodexPane(fixture, sessionID: "worker-1")
+    let target = dispatchTarget(fixture)
+    let dispatch = try fixture.manager.issueAgentDispatch(boundTo: target)
+    let signal = AgentSignal(
+      kind: kind, source: .cooperativeCLI, confidence: .exact,
+      timestamp: Date(), sessionID: "worker-1", detail: nil, claimedOrigin: nil)
+    let caller = CallerPane(
+      worktreeID: target.worktreeID, surfaceID: fixture.surfaceID, processAncestry: [generation])
+    #expect(fixture.manager.recordAgentSignal(signal, caller: caller) == .recorded(binding: .current))
+
+    // The agent exits inside the coalescing window: the pane is a bare shell again.
+    fixture.state.surfaceAgentStates[fixture.surfaceID] = nil
+    await registerCoalescingTask()
+    await clock.advance(by: .milliseconds(300))
+    await registerCoalescingTask()
+
+    let snapshot = try #require(dispatchStore.snapshot(dispatchID: dispatch.record.id))
+    if kind == .sessionEnd {
+      guard case .gone(_, _, _, .sessionEnd) = snapshot.record else {
+        Issue.record("An agent that ended its session and exited must settle as gone, got \(snapshot.record)")
+        return
+      }
+    } else {
+      #expect(snapshot.record.state == .pending)
+      #expect(fixture.manager.revalidateAgentDispatch(.incomplete(snapshot)) == .incomplete(snapshot))
+    }
+  }
+
+  @Test func rejectedBindingKeepsTheSurfacePendingDispatchEvidence() throws {
+    let fixture = makeFixture()
+    let generation = try runningCodexPane(fixture, sessionID: "worker-1")
+    let target = dispatchTarget(fixture)
+    let dispatch = try fixture.manager.issueAgentDispatch(boundTo: target)
+    let signal = AgentSignal(
+      kind: .needsInput, source: .cooperativeCLI, confidence: .exact,
+      timestamp: Date(), sessionID: "worker-1", detail: nil, claimedOrigin: nil)
+    let caller = CallerPane(
+      worktreeID: target.worktreeID, surfaceID: fixture.surfaceID, processAncestry: [generation])
+    #expect(fixture.manager.recordAgentSignal(signal, caller: caller) == .recorded(binding: .current))
+
+    let second = try fixture.manager.issueAgentDispatch()
+    #expect(throws: AgentDispatchStoreError.surfacePending) {
+      try fixture.manager.bindAgentDispatch(dispatchID: second.record.id, target: target)
+    }
+    #expect(fixture.manager.revalidateAgentDispatch(.needsInput(dispatch)) == .needsInput(dispatch))
   }
 
   @Test func liveShellStartsWithAtomicEmptySnapshotAndReplaysLatestSignal() async throws {
@@ -684,10 +737,14 @@ struct AgentObservationTests {
     let surfaceID: UUID
   }
 
-  private func makeFixture(bufferCapacity: Int = 64) -> Fixture {
+  private func makeFixture(
+    bufferCapacity: Int = 64,
+    dispatchStore: AgentDispatchStore = AgentDispatchStore()
+  ) -> Fixture {
     let manager = WorktreeTerminalManager(
       runtime: GhosttyRuntime(),
-      agentObservationBufferCapacity: bufferCapacity
+      agentObservationBufferCapacity: bufferCapacity,
+      agentDispatchStore: dispatchStore
     )
     let worktree = Worktree(
       id: "/tmp/agent-observation",
@@ -700,6 +757,28 @@ struct AgentObservationTests {
     let tabID = state.createTab()!
     let surfaceID = state.focusedSurfaceId(in: tabID)!
     return Fixture(manager: manager, state: state, tabID: tabID, surfaceID: surfaceID)
+  }
+
+  /// Detects a working Codex in the fixture pane, owned by the test host process.
+  private func runningCodexPane(_ fixture: Fixture, sessionID: String) throws -> LocalProcessGeneration {
+    let generation = LocalProcessGeneration(
+      pid: getpid(), startedAt: try #require(ProcessDetection.processStartDate(pid: getpid())))
+    var pane = PaneAgentState(detectedAgent: .codex, agentProcess: .local(getpid()), state: .working)
+    pane.session = AgentSession(id: sessionID, transcriptPath: nil, source: .openFile, confidence: .exact)
+    fixture.state.surfaceAgentStates[fixture.surfaceID] = pane
+    return generation
+  }
+
+  private func dispatchTarget(_ fixture: Fixture) -> TabResolvedTarget {
+    TabResolvedTarget(
+      worktreeID: "/tmp/agent-observation", worktreeName: "agent-observation",
+      worktreePath: "/tmp/agent-observation", worktreeRootPath: "/tmp/agent-observation", worktreeKind: "git",
+      tabID: fixture.tabID.rawValue.uuidString, tabTitle: "Codex", tabSelected: true,
+      paneID: fixture.surfaceID.uuidString, paneTitle: "Codex", paneCWD: "/tmp/agent-observation", paneFocused: true)
+  }
+
+  private func registerCoalescingTask() async {
+    for _ in 0..<10 { await Task.yield() }
   }
 
   private func makeSignal(detail: String? = nil) -> AgentSignal {
