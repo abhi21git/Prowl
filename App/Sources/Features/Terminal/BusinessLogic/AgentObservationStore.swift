@@ -87,8 +87,15 @@ final class AgentObservationStore {
     var subscribers: [UUID: AgentObservationStream.Continuation] = [:]
 
     mutating func bufferManagedHook(_ input: AgentNativeHookInput, callerAncestry: [LocalProcessGeneration]) {
-      guard let managedHook, managedHook.pendingSignals.count < 8 else { return }
-      self.managedHook?.pendingSignals.append(PendingManagedHookSignal(input: input, callerAncestry: callerAncestry))
+      guard var managed = managedHook else { return }
+      if managed.pendingSignals.count == 8 {
+        // Codex has only turn-end hooks. Keep recent evidence while detection lags;
+        // old temporary threads must not permanently occupy every pending slot.
+        guard managed.launch.runtime == .codex else { return }
+        managed.pendingSignals.removeFirst()
+      }
+      managed.pendingSignals.append(PendingManagedHookSignal(input: input, callerAncestry: callerAncestry))
+      managedHook = managed
     }
 
     mutating func clearCurrentSignals() {

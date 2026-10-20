@@ -24,6 +24,36 @@ struct ManagedAgentHookObservationTests {
     #expect(store.currentSignalEvidence(surfaceID: surfaceID).activeTerminal?.sessionID == "session-1")
   }
 
+  @Test(arguments: [false, true], ["worker", "temporary-0"])
+  func latestCodexHookSurvivesFullPendingBuffer(generationDetected: Bool, confirmedSession: String) {
+    let now = Date(timeIntervalSince1970: 100)
+    let generation = LocalProcessGeneration(pid: 900, startedAt: now)
+    let store = AgentObservationStore(bufferCapacity: 8, now: { now })
+    let surfaceID = UUID()
+    let registration = makeRegistration(runtime: .codex, cwd: "/tmp/project")
+    _ = store.registerManagedHook(registration, surfaceID: surfaceID)
+    if generationDetected {
+      _ = store.updateEvidenceEpoch(surfaceID: surfaceID, processGeneration: generation, sessionID: nil)
+    }
+    for index in 0..<8 {
+      let foreign = makeInput(
+        runtime: .codex, token: registration.token, nativeEvent: "agent-turn-complete",
+        cwd: "/tmp/project", sessionID: "temporary-\(index)")
+      #expect(store.recordManagedHook(foreign, callerAncestry: [generation], surfaceID: surfaceID) == .pending)
+    }
+    let worker = makeInput(
+      runtime: .codex, token: registration.token, nativeEvent: "agent-turn-complete",
+      cwd: "/tmp/project", sessionID: "worker")
+    #expect(store.recordManagedHook(worker, callerAncestry: [generation], surfaceID: surfaceID) == .pending)
+    #expect(store.currentSignalEvidence(surfaceID: surfaceID).activeTerminal == nil)
+    let update = store.updateEvidenceEpoch(
+      surfaceID: surfaceID, processGeneration: generation, sessionID: confirmedSession)
+    let confirmsWorker = confirmedSession == "worker"
+    #expect(update.activatedSignals.count == (confirmsWorker ? 1 : 0))
+    #expect(
+      store.currentSignalEvidence(surfaceID: surfaceID).activeTerminal?.sessionID == (confirmsWorker ? "worker" : nil))
+  }
+
   @Test func epochInvalidationReportsTheSupersededEpoch() {
     let now = Date(timeIntervalSince1970: 100)
     let generation = LocalProcessGeneration(pid: 900, startedAt: now)

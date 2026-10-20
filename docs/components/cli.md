@@ -443,7 +443,9 @@ moment after the close, so a wait issued in that same instant may still report
 `DISPATCH_INCOMPLETE`; re-run it.
 
 Managed Codex turn-end hooks must match the independently detected pane session before
-resolving a dispatch wait. Hooks awaiting that confirmation remain pending. A session or
+resolving a dispatch wait. Hooks awaiting that confirmation remain pending in a bounded
+buffer of the eight most recent Codex hooks; newer hooks replace the oldest when full.
+Debug logs identify the hook session and detected session when a hook is deferred. A session or
 process change clears old signal-derived wait evidence; a stale diagnostic signal alone
 cannot end the wait. A matching completion receipt still resolves the original dispatch.
 

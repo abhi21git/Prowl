@@ -596,7 +596,7 @@ final class WorktreeTerminalManager {
   @discardableResult
   func recordAgentNativeHook(_ input: AgentNativeHookInput, caller: CallerPane) -> Bool {
     guard containsSurface(caller.surfaceID) else { return false }
-    refreshEvidenceEpoch(surfaceID: caller.surfaceID)
+    let evidence = refreshEvidenceEpoch(surfaceID: caller.surfaceID)
     switch agentObservationStore.recordManagedHook(
       input,
       callerAncestry: caller.processAncestry,
@@ -605,6 +605,10 @@ final class WorktreeTerminalManager {
     case .rejected:
       return false
     case .pending:
+      terminalLogger.debug(
+        "Managed hook deferred runtime=\(input.runtime.rawValue) pane=\(caller.surfaceID) "
+          + "hookSession=\(input.signal.sessionID) detectedSession=\(evidence.sessionID ?? "unknown")"
+      )
       return true
     case .accepted(let signal, let evidenceEpoch):
       noteDispatchEvidence(signal, surfaceID: caller.surfaceID, evidenceEpoch: evidenceEpoch)

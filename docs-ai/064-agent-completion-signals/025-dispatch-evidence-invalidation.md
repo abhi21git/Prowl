@@ -35,21 +35,51 @@ Clearing only the timer misses retained and already-buffered incomplete events.
 Automatically moving a dispatch to the new epoch would let replacement work inherit
 an earlier assignment. Keep attribution, invalidation and consumption checks explicit.
 
+## Bounded pending evidence
+
+The takeover review found that retaining the first eight pending hooks could
+permanently exclude a later worker hook while detection lagged. Codex now retains
+the eight most recent pending hooks, evicting the oldest on overflow. The bound
+is unchanged, and eviction never promotes an unconfirmed hook. Other runtimes
+retain their existing startup event ordering. This is a bounded fallback, not
+lossless delivery: an evicted hook cannot become evidence later, but an explicit
+completion receipt remains independent of this buffer.
+
+Deferred-hook diagnostics record the pane, hook session and independently detected
+session at ingress. They do not log the launch token or repeat on detector replay.
+
 ## Verification
 
 - Source-level reproduction confirmed the foreign first-hook and stale-evidence
   failure before the fix. The updated production stores exclude the foreign thread from current evidence,
   clear evidence invalidated before or after coalescing, and accept the later receipt.
-- 137 native tests passed across `AgentDispatchStoreTests`,
+- 138 native tests passed across `AgentDispatchStoreTests`,
   `ManagedAgentHookObservationTests`, `AgentWaitCommandHandlerTests`,
   `AgentObservationTests`, `WorktreeTerminalManagerTests`, and `AgentS3bHookPayloadTests`.
   Coverage includes deferred confirmation, legitimate session rotation, buffered event
   revalidation, detector refresh through the manager, receipt and pane-close precedence,
-  timeout preservation, and screen capture after a valid wait decision.
+  timeout preservation, and screen capture after a valid wait decision. A new
+  parameterized saturation test first failed because no worker hook activated;
+  it now verifies both retention of the newest and eviction of the oldest hook,
+  before and after process detection.
 - `make check` passed, including 241 script tests; `make build-app` passed with
-  zero errors and warnings.
-- A live Codex worker end-to-end rerun was not part of this verification.
+  zero errors and warnings. The first cold test build also reported existing
+  dependency and unrelated test warnings; the final focused test run had none.
+- Live baseline: Prowl 2026.10.17 with Codex 0.163.0 returned
+  `DISPATCH_INCOMPLETE` after 9.164 seconds while a worker was still running.
+  The hook session differed from the worker session; the same dispatch later
+  received a successful receipt.
+- Live fixed Debug app: three fresh Codex Profile launches all completed on their
+  first dispatch wait (45.993, 37.914 and 37.908 seconds). Each ran a 25-second
+  command and verified a temporary file before submitting its receipt. The third
+  run directly captured a foreign hook deferred before session detection, followed
+  by a different independently detected worker session, a successful receipt, and
+  that worker's verified live hook. The first two runs prove normal completion;
+  buffered stdout prevented full foreign-hook attribution for those runs.
+- Live verification used the worktree CLI and a dedicated socket. Test panes and
+  the Debug process were closed; the installed Prowl instance was left running.
 
 ## Refs
 
 - #944
+- #945 (original contribution by philo-veritas)
