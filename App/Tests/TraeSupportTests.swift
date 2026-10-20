@@ -931,4 +931,165 @@ struct TraeSupportTests {
       WorktreeTerminalState.corroboratedScreenDetection(
         idle, agent: .codex, title: "⠋ Codex | Prowl") == idle)
   }
+
+  // MARK: - Public 0.209.1 captures
+
+  // The screens below were captured from the public traecli 0.209.1 build in a Prowl pane
+  // (`prowl read --source detection`). The public build renders its dialog footers as
+  // `<key> <action>` hints joined by `  |  `, not the `enter to submit | esc to cancel`
+  // form of the on-prem build.
+
+  private static let publicStatusBar =
+    "  gpt-oss:20b medium · Context 100% left · /private/tmp/proj ▧ Workspace Edit · ← for agents"
+
+  @Test func publicApprovalBlockerTextKeepsTheCommandOptionsAndFooter() throws {
+    let agent = try agent()
+    let border = String(repeating: "─", count: 140)
+    let screen = """
+      ▍ approve
+
+
+      ◆ Running echo approved-run > /tmp/prowl-trae-approve.txt
+
+      \(border)
+
+        Would you like to run the following command?
+
+        Reason: Write a marker file outside the sandbox
+
+        $ echo approved-run > /tmp/prowl-trae-approve.txt
+
+      ❯ 1. Yes, proceed (y)
+        2. Yes, switch this session to auto mode (r)
+        3. Yes, switch this session to full access mode (f)
+        4. Yes, and don't ask again for commands that start with `echo approved-run > /tmp/prowl-trae-approve.txt` (p)
+        5. No, and tell TRAE CLI what to do differently (esc)
+
+        enter confirm  |  esc cancel
+      """
+    #expect(agent.detectState(in: screen) == .blocked)
+    let text = try #require(traeBlockerText(in: agent.detectionSnapshot(from: screen)))
+    #expect(text.hasPrefix("Would you like to run the following command?"))
+    #expect(text.contains("$ echo approved-run > /tmp/prowl-trae-approve.txt"))
+    #expect(text.contains("❯ 1. Yes, proceed (y)"))
+    #expect(text.hasSuffix("enter confirm  |  esc cancel"))
+  }
+
+  @Test func publicQuestionBlockerTextKeepsTheFooter() throws {
+    let agent = try agent()
+    let border = String(repeating: "─", count: 140)
+    let screen = """
+      ▍ ask
+
+
+      \(border)
+
+        Question 1/1 (1 unanswered)
+        Which color should the button use?
+
+        ❯ 1. Blue               The system accent
+          2. Green              A success tone
+          3. Red                A warning tone
+          4. None of the above  Optionally, add details in notes (tab).
+
+        tab add notes  |  enter submit answer  |  esc interrupt
+      """
+    #expect(agent.detectState(in: screen) == .blocked)
+    let text = try #require(traeBlockerText(in: agent.detectionSnapshot(from: screen)))
+    #expect(text.hasPrefix("Question 1/1 (1 unanswered)"))
+    #expect(text.hasSuffix("tab add notes  |  enter submit answer  |  esc interrupt"))
+  }
+
+  @Test func publicTrustBlockerTextLeavesTheWelcomeBannerOut() throws {
+    let agent = try agent()
+    // The first-run trust prompt renders at column 0 under the welcome banner, with no
+    // other chrome between them, so the dialog region must stop at the banner.
+    let screen = """
+      ████████ ████████   ███████  ████████    ██████ ██      ██
+         ██    ██     ██ ██    ██  ██         ██      ██      ██
+         ██    ████████  ████████  ██████     ██      ██      ██
+         ██    ██     ██ ██    ██  ████████    ██████ ██████  ██
+
+        Welcome to TRAE CLI — your intelligent coding companion
+
+
+        Folder access
+        /private/tmp/proj
+
+        Do you trust the contents of this directory? Working with untrusted contents comes with
+        higher risk of prompt injection.
+
+      ❯ 1. Yes, continue
+        2. No, quit
+
+        enter continue  |  esc quit
+      """
+    #expect(agent.detectState(in: screen) == .blocked)
+    let text = try #require(traeBlockerText(in: agent.detectionSnapshot(from: screen)))
+    #expect(text.hasPrefix("Folder access"))
+    #expect(text.contains("Do you trust the contents of this directory?"))
+    #expect(text.hasSuffix("enter continue  |  esc quit"))
+    #expect(!text.contains("█"))
+    #expect(!text.contains("Welcome to TRAE CLI"))
+  }
+
+  @Test func publicFooterWithoutOptionsReadsAsBlocked() throws {
+    let agent = try agent()
+    // A free-form field has no option rows; its key-hint footer is the dialog's chrome.
+    let border = String(repeating: "─", count: 140)
+    let screen = """
+      \(border)
+
+        Question 1/1 (1 unanswered)
+        What should the new file be called?
+
+        enter submit answer  |  esc interrupt
+      """
+    #expect(agent.detectState(in: screen) == .blocked)
+  }
+
+  @Test func keyHintsWithoutEnterAndEscStayUnknown() throws {
+    let agent = try agent()
+    // The transcript pager's footer is key hints too, but it is not a dialog.
+    let border = String(repeating: "─", count: 140)
+    let screen = """
+      ▍ plan8 slow20
+      \(border) 100% ─
+       ↑/↓ scroll  |  ctrl+b/ctrl+f page  |  home/end jump  |  ←/→ prompts
+       q quit  |  esc/← edit prev  |  / search
+      """
+    #expect(agent.detectState(in: screen) == .unknown)
+  }
+
+  @Test func narrowPaneFooterClippedAfterItsBulletReadsAsWorking() throws {
+    let agent = try agent()
+    // A 20-column pane: traecli clips the running footer right after the elapsed-time
+    // bullet, and the status bar loses its signature.
+    let screen = """
+      ▍ 20
+
+
+      ✦ Working… (2s •…
+       word0 word1 w… ─
+      ❯ Explain this c
+      ─────────────────
+        ▧ Workspace Edi
+      """
+    #expect(agent.detectState(in: screen) == .working)
+  }
+
+  @Test func publicIdleComposerUnderABackgroundShellReadsAsIdle() throws {
+    let agent = try agent()
+    let border = String(repeating: "─", count: 140)
+    let screen = """
+        Worked for <1s • 23:22
+
+      ◈ 1 background shell running… you can still chat · /ps to manage
+      \(String(repeating: "─", count: 100)) word0 word1 word2 word3 word4 word5 ─
+      ❯ Explain this codebase
+      \(border)
+      \(Self.publicStatusBar)
+      """
+    #expect(agent.detectState(in: screen) == .idle)
+  }
 }

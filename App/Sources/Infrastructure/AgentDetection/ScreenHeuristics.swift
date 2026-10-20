@@ -1124,9 +1124,17 @@ nonisolated private func isTraeDialogContent(_ screen: TraeScreen, _ index: Int)
   let raw = screen.rows[index].raw
   let line = screen.lines[index]
   if isTraeStatusBarRow(line) { return false }
+  if isTraeWelcomeBannerRow(line) { return false }
   if line.allSatisfy({ $0 == "─" }) { return false }
   if isTraePromptRow(line), !isTraeSelectionRow(line) { return false }
   return !isTraeLiveFooterLead(raw)
+}
+
+/// The welcome banner — block-element art and its greeting. The first-run trust prompt
+/// renders at column 0 directly under it, with no other chrome between them.
+nonisolated private func isTraeWelcomeBannerRow(_ line: String) -> Bool {
+  if line.lowercased().hasPrefix("welcome to trae cli") { return true }
+  return line.unicodeScalars.allSatisfy { $0 == " " || (0x2580...0x259F).contains($0.value) }
 }
 
 /// How far above its marker a dialog's rows are read. The widest known form — an
@@ -1143,17 +1151,30 @@ nonisolated private func isTraeStatusBarRow(_ line: String) -> Bool {
   return lower.contains("context ") && lower.contains("% left")
 }
 
-/// traecli's live dialog footer: `<key> to submit[_ all| answer] | esc to cancel` on
-/// approval forms, `↑/↓ to navigate fields   esc to cancel` on elicitation forms.
+/// traecli's live dialog footer. The on-prem build renders
+/// `<key> to submit[_ all| answer] | esc to cancel` on approval forms and
+/// `↑/↓ to navigate fields   esc to cancel` on elicitation forms; the public 0.209.1 build
+/// renders key hints joined by `  |  ` (`enter confirm  |  esc cancel`).
 /// The row has to carry the cancel/navigate chrome as well as the phrase: matching
 /// the phrase alone let ordinary content forge modal chrome — a working directory
 /// like `/tmp/how to submit` turned a settled composer into Blocked.
 nonisolated private func isTraeDialogFooterRow(_ line: String) -> Bool {
   let lower = line.lowercased()
+  if isTraeKeyHintFooterRow(lower) { return true }
   guard lower.contains("esc to ") else { return false }
   return lower.contains(" to submit")
     || lower.contains("to navigate fields")
     || lower.contains("to navigate questions")
+}
+
+/// The public build's dialog footer: `enter continue  |  esc quit`,
+/// `tab add notes  |  enter submit answer  |  esc interrupt`. It needs an `enter` hint and
+/// an `esc` hint as their own `|`-separated segments, which the transcript pager's footer
+/// (`q quit  |  esc/← edit prev  |  / search`) does not carry.
+nonisolated private func isTraeKeyHintFooterRow(_ lowercasedLine: String) -> Bool {
+  let segments = lowercasedLine.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+  guard segments.count >= 2 else { return false }
+  return segments.contains { $0.hasPrefix("enter ") } && segments.contains { $0.hasPrefix("esc ") }
 }
 
 /// traecli's y/n confirmation renders as a bracketed choice at the end of the
@@ -1308,7 +1329,8 @@ nonisolated private func isTraeLiveFooterLead(_ rawLine: String) -> Bool {
 /// elapsed-time chrome that precedes the token/shell chrome, e.g.
 /// `❖ The live block header might be rendered above the visible window (42m 53s •`.
 /// The opening parenthesis and its duration are the last marks traecli renders
-/// before it truncates, so they survive where the interrupt hint does not. The
+/// before it truncates, so they survive where the interrupt hint does not; in a narrow
+/// pane the clip can fall right after the bullet (`✦ Working… (2s •…`). The
 /// column-0 glyph keeps transcript prose and tool output (`  └ (2s · timeout 2m)`,
 /// which uses `·`, not `•`, and is indented) from speaking for the live state.
 nonisolated private func isTraeClippedRunningFooter(_ rawLine: String) -> Bool {
@@ -1316,7 +1338,7 @@ nonisolated private func isTraeClippedRunningFooter(_ rawLine: String) -> Bool {
   var remainder = rawLine[...]
   while let open = remainder.firstIndex(of: "(") {
     let rest = remainder[remainder.index(after: open)...]
-    if let bullet = rest.range(of: " • "), isTraeElapsedDuration(rest[..<bullet.lowerBound]) {
+    if let bullet = rest.range(of: " •"), isTraeElapsedDuration(rest[..<bullet.lowerBound]) {
       return true
     }
     remainder = rest

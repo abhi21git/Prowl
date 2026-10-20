@@ -156,7 +156,8 @@ live-block header arrives with its tail cut off: `✦ <streaming snippet> (42m 5
 turn then reads as a settled composer (captured live on 0.209.1 at the moment the
 badge flipped). Two guards cover that frame. The detector treats a clipped header as
 the running hint: a column-0 live glyph (the rotating sparkle marks, `✦ ✧ ❖ ◆ ◈ ⋄ …`)
-followed by the elapsed-time chrome `(<elapsed> •`. Prose, tool output, and quoted
+followed by the elapsed-time chrome `(<elapsed> •` — in a narrow pane the clip can
+fall right after the bullet (`✦ Working… (2s •…`). Prose, tool output, and quoted
 chrome cannot forge it — `└ Run finished (2s · timeout 2m)` is indented and uses `·`,
 not `•` — so a transcript line only qualifies when it opens with that glyph. Clipping
 can cut even the elapsed opener off, and a pane scrolled into history or caught mid
@@ -186,8 +187,9 @@ a form whose only chrome is its submit/navigate footer; a bracketed y/n confirma
 Enter/Esc chrome). Most dialogs render inside the live block's two-space gutter, but
 the first-run trust prompt and the login screens render their question and choices at
 column 0, so the region is delimited by what it *stops* at instead of by indentation:
-the composer box (its prompt row, its `─` rules, the status bar under it) and
-the live block's or transcript's own glyph-headed rows, capped at 16 rows so a
+the composer box (its prompt row, its `─` rules, the status bar under it),
+the live block's or transcript's own glyph-headed rows, and the welcome banner that the
+trust prompt renders under, capped at 16 rows so a
 transcript running straight into a dialog cannot hand `agents read` unbounded history.
 A dialog that renders *below* a composer box supersedes it — the box is then quoted
 transcript — while a dialog above the live composer stays transcript. Anything else is
@@ -196,7 +198,9 @@ reading.
 
 The chrome is matched by its structure, not by a phrase inside it. A footer row has to
 carry its cancel/navigate chrome as well as the submit or navigate phrase
-(`enter to submit | esc to cancel`, `↑/↓ to navigate fields   esc to cancel`), the
+(`enter to submit | esc to cancel`, `↑/↓ to navigate fields   esc to cancel` on the
+on-prem build; key hints such as `enter confirm  |  esc cancel` on the public 0.209.1
+build, which need both an `enter` and an `esc` segment), the
 running interrupt mark has to be parenthesized (`(esc to interrupt)`,
 `(23s • esc to interrupt)`), and the auth chrome has to open with its key chord
 (`Press Esc to cancel`). The composer's status bar — `<model> · Context <n>% left ·
