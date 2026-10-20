@@ -104,6 +104,22 @@ stay pending. A wait without a receipt then ends at its timeout rather than with
 - Live verification used the worktree CLI and a dedicated socket. Test panes and
   the Debug process were closed; the installed Prowl instance was left running.
 
+## Live verification of the loss fix
+
+Isolated Debug instance (temporary `CFFIXED_USER_HOME`, dedicated socket), Claude Code
+2.1.304 and Codex 0.163.0 Profiles, HEAD `bf6e58be` against a baseline build of `a958c118`:
+
+| Scenario | `bf6e58be` | `a958c118` |
+| --- | --- | --- |
+| Claude turn ends without a receipt, then `/exit`, then a new wait | `AGENT_GONE` (`session_end`), immediately | `AGENT_GONE`, immediately |
+| Codex Profile kickoff with a receipt | `succeeded` | `succeeded` |
+| Codex turn ends without a receipt (`hook_codex` accepted), then `/quit`, then a new wait | `DISPATCH_INCOMPLETE`, immediately | `WAIT_TIMEOUT` after 20 s |
+
+The Codex row reproduces the defect: the agent entry removal revoked the hook and
+cleared the committed evidence. The Claude row did not reproduce it on the baseline,
+because Claude exits more than 300 ms after its SessionEnd hook, so the candidate commits
+first. That race is covered only by the native tests.
+
 ## Refs
 
 - #944
