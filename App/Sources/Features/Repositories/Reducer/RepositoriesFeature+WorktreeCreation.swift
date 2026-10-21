@@ -300,6 +300,7 @@ extension RepositoriesFeature {
       let isValidBranchName = gitClient.isValidBranchName
       return .run { send in
         var newWorktreeName: String?
+        var createdWorktreeDirectory: URL?
         var progress = WorktreeCreationProgress(stage: .loadingLocalBranches)
         var progressUpdateThrottle = WorktreeCreationProgressUpdateThrottle(
           stride: worktreeCreationProgressUpdateStride
@@ -346,7 +347,7 @@ extension RepositoriesFeature {
                     previousSelection: previousSelection,
                     repositoryID: repository.id,
                     name: nil,
-                    baseDirectory: worktreeBaseDirectory
+                    worktreeDirectory: nil
                   )
                 )
               )
@@ -365,7 +366,7 @@ extension RepositoriesFeature {
                     previousSelection: previousSelection,
                     repositoryID: repository.id,
                     name: nil,
-                    baseDirectory: worktreeBaseDirectory
+                    worktreeDirectory: nil
                   )
                 )
               )
@@ -381,7 +382,7 @@ extension RepositoriesFeature {
                     previousSelection: previousSelection,
                     repositoryID: repository.id,
                     name: nil,
-                    baseDirectory: worktreeBaseDirectory
+                    worktreeDirectory: nil
                   )
                 )
               )
@@ -397,7 +398,7 @@ extension RepositoriesFeature {
                     previousSelection: previousSelection,
                     repositoryID: repository.id,
                     name: nil,
-                    baseDirectory: worktreeBaseDirectory
+                    worktreeDirectory: nil
                   )
                 )
               )
@@ -413,7 +414,7 @@ extension RepositoriesFeature {
                     previousSelection: previousSelection,
                     repositoryID: repository.id,
                     name: nil,
-                    baseDirectory: worktreeBaseDirectory
+                    worktreeDirectory: nil
                   )
                 )
               )
@@ -497,6 +498,12 @@ extension RepositoriesFeature {
             pathOverride: placement.path,
             branchName: name
           )
+          // Failure cleanup deletes the directory outright, so it only takes one this attempt creates.
+          let worktreeDirectory =
+            directoryOverride ?? worktreeBaseDirectory.appending(path: name, directoryHint: .isDirectory)
+          if !FileManager.default.fileExists(atPath: worktreeDirectory.path(percentEncoded: false)) {
+            createdWorktreeDirectory = worktreeDirectory
+          }
           progress.stage = .creatingWorktree
           progress.commandText = worktreeCreateCommand(
             baseDirectoryURL: worktreeBaseDirectory,
@@ -589,7 +596,7 @@ extension RepositoriesFeature {
                 previousSelection: previousSelection,
                 repositoryID: repository.id,
                 name: newWorktreeName,
-                baseDirectory: worktreeBaseDirectory
+                worktreeDirectory: createdWorktreeDirectory
               )
             )
           )
@@ -632,7 +639,7 @@ extension RepositoriesFeature {
       let previousSelection,
       let repositoryID,
       let name,
-      let baseDirectory
+      let worktreeDirectory
     ):
       let previousSelectedWorktree = state.worktree(for: previousSelection)
       removePendingWorktree(pendingID, state: &state)
@@ -640,7 +647,7 @@ extension RepositoriesFeature {
       let cleanup = cleanupFailedWorktree(
         repositoryID: repositoryID,
         name: name,
-        baseDirectory: baseDirectory,
+        worktreeDirectory: worktreeDirectory,
         state: &state
       )
       state.alert = messageAlert(title: title, message: message)

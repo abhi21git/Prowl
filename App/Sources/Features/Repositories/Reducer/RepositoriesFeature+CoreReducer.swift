@@ -202,7 +202,6 @@ extension RepositoriesFeature {
       return .send(.reloadRepositories(animated: false))
 
     case .reloadRepositories(let animated):
-      state.alert = nil
       let roots = state.repositoryRoots
       guard !roots.isEmpty else {
         state.isRefreshingWorktrees = false
@@ -920,6 +919,7 @@ extension RepositoriesFeature {
       return .none
 
     case .alert(.presented(.retryRepositoryLoad)):
+      state.alert = nil
       return .send(.refreshWorktrees)
 
     case .alert(.presented(.copyRepositoryLoadFailure(let detail))):

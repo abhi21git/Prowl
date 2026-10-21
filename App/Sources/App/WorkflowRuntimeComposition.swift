@@ -594,7 +594,7 @@ nonisolated enum WorktreeBranchReader {
     guard let git = GitExecutableResolver.shared.cachedExecutable else { return nil }
     let process = Process()
     process.executableURL = git.url
-    process.environment = ProcessInfo.processInfo.environment.merging(git.environment) { _, selected in selected }
+    process.environment = git.processEnvironment
     process.arguments = [
       "-C", worktree.path(percentEncoded: false), "symbolic-ref", "--short", "-q", "HEAD",
     ]

@@ -34,9 +34,13 @@ it to a git repository and refreshes the sidebar.
 
 ## Git availability and load errors
 
-Prowl uses a working Git from the app PATH, your login shell PATH, or common
-installation locations. Apple Git requires working Command Line Tools; a full
-Xcode installation is not required. Independent Git installations can also be used.
+Prowl uses the first working Git on your login shell PATH. If there is none, it tries
+the app PATH, then common installation locations. Apple Git requires working Command
+Line Tools; a full Xcode installation is not required. Independent Git installations
+can also be used. Git and the bundled `wt` run with your login shell PATH, so Git hooks
+and helpers (`git-lfs`, credential helpers, `ssh`) find the same tools as in a terminal.
+If an earlier Git on that PATH does not work, the selected Git's folder goes first.
+Without a login shell PATH, they use the app PATH.
 Each executable or login-shell probe has a five-second timeout. A stalled probe
 is stopped, including its child processes, before discovery tries the next source.
 Cancelling one request does not interrupt discovery for other active requests.
@@ -99,6 +103,11 @@ Press **↩** to create, **Esc** to cancel. Branch names are validated live
 progress through stages: reading local branches → choosing a name → checking repo
 mode → resolving the base ref → fetching → creating. A **Pending** row shows the
 live status until it's ready.
+
+If creation fails, the error shows the end of Git's output, where Git and hooks
+report the cause. Prowl removes the worktree folder only if this attempt created it,
+and keeps the branch. A Git hook that exits with an error fails the creation, even
+when the checkout itself succeeded.
 
 **Copying uncommitted files:** new worktrees can optionally copy `.gitignore`'d
 files (`copyIgnoredOnWorktreeCreate`) and/or untracked files

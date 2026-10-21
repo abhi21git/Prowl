@@ -81,10 +81,10 @@ func removeWorktree(
 func cleanupFailedWorktree(
   repositoryID: Repository.ID,
   name: String?,
-  baseDirectory: URL,
+  worktreeDirectory: URL?,
   state: inout RepositoriesFeature.State
 ) -> FailedWorktreeCleanup {
-  guard let name, !name.isEmpty else {
+  guard let name, !name.isEmpty, let worktreeDirectory else {
     return FailedWorktreeCleanup(
       didRemoveWorktree: false,
       didUpdatePinned: false,
@@ -93,19 +93,7 @@ func cleanupFailedWorktree(
     )
   }
   let repositoryRootURL = URL(fileURLWithPath: repositoryID).standardizedFileURL
-  let normalizedBaseDirectory = baseDirectory.standardizedFileURL
-  let worktreeURL =
-    normalizedBaseDirectory
-    .appending(path: name, directoryHint: .isDirectory)
-    .standardizedFileURL
-  guard isPathInsideBaseDirectory(worktreeURL, baseDirectory: normalizedBaseDirectory) else {
-    return FailedWorktreeCleanup(
-      didRemoveWorktree: false,
-      didUpdatePinned: false,
-      didUpdateOrder: false,
-      worktree: nil
-    )
-  }
+  let worktreeURL = worktreeDirectory.standardizedFileURL
   let worktreeID = worktreeURL.path(percentEncoded: false)
   let worktree =
     state.repositories[id: repositoryID]?.worktrees[id: worktreeID]
@@ -127,10 +115,6 @@ func cleanupFailedWorktree(
     didUpdateOrder: cleanup.didUpdateOrder,
     worktree: worktree
   )
-}
-
-func isPathInsideBaseDirectory(_ path: URL, baseDirectory: URL) -> Bool {
-  PathPolicy.contains(path, in: baseDirectory)
 }
 
 struct WorktreeCleanupStateResult {
