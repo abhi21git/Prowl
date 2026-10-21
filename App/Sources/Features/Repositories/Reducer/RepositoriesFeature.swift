@@ -166,7 +166,8 @@ struct RepositoriesFeature {
       previousSelection: Worktree.ID?,
       repositoryID: Repository.ID,
       name: String?,
-      baseDirectory: URL
+      /// The directory this attempt created, if any. Cleanup removes only this directory.
+      worktreeDirectory: URL?
     )
     case consumeSetupScript(Worktree.ID)
     case consumeTerminalFocus(Worktree.ID)

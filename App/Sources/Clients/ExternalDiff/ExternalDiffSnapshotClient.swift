@@ -100,7 +100,7 @@ private nonisolated struct ExternalDiffSnapshotBuilder {
 
     let process = Process()
     process.executableURL = git.url
-    process.environment = ProcessInfo.processInfo.environment.merging(git.environment) { _, selected in selected }
+    process.environment = git.processEnvironment
     process.arguments = [
       "-C",
       worktreeURL.path(percentEncoded: false),

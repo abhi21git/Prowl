@@ -124,6 +124,41 @@ struct RepositoriesFeatureTests {
     }
   }
 
+  @Test func backgroundRefreshKeepsTheVisibleAlert() async {
+    // App activation, the registry monitor, and the periodic timer all refresh. A failure
+    // alert, such as a failed worktree creation, must stay until the user dismisses it.
+    let worktree = makeWorktree(id: "/tmp/repo/main", name: "main")
+    let repository = makeRepository(id: "/tmp/repo", worktrees: [worktree])
+    var initialState = makeState(repositories: [repository])
+    let alert = AlertState<RepositoriesFeature.Alert> {
+      TextState("Unable to create worktree")
+    } actions: {
+      ButtonState(role: .cancel) {
+        TextState("OK")
+      }
+    } message: {
+      TextState("boom")
+    }
+    initialState.alert = alert
+    let store = TestStore(initialState: initialState) {
+      RepositoriesFeature()
+    } withDependencies: {
+      $0.gitClient.worktrees = { _ in [worktree] }
+    }
+    store.timeout = .realWorkTestStoreTimeout
+
+    await store.send(.refreshWorktrees) {
+      $0.isRefreshingWorktrees = true
+    }
+    await store.receive(\.reloadRepositories)
+    await store.receive(\.repositoriesLoaded) {
+      $0.isRefreshingWorktrees = false
+      $0.isInitialLoadComplete = true
+      $0.snapshotPersistencePhase = .active
+    }
+    #expect(store.state.alert == alert)
+  }
+
   @Test func refreshWorktreesWithoutRootsStopsRefreshingImmediately() async {
     let store = TestStore(initialState: RepositoriesFeature.State()) {
       RepositoriesFeature()
@@ -3088,48 +3123,155 @@ struct RepositoriesFeatureTests {
     await store.finish()
   }
 
-  @Test func createRandomWorktreeFailedWithTraversalNameSkipsCleanup() async {
+  @Test(.dependencies) func failedWorktreeCreationCleansUpTheDirectoryItCreated() async throws {
+    let baseDirectory = try makeTemporaryWorktreeBaseDirectory()
+    defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+    let expected = ProwlPaths.worktreeBaseDirectory(
+      for: URL(fileURLWithPath: "/tmp/repo"),
+      globalDefaultPath: baseDirectory.path(percentEncoded: false),
+      repositoryOverridePath: nil
+    )
+    .appending(path: "new-branch", directoryHint: .isDirectory)
+    .standardizedFileURL
+    .path(percentEncoded: false)
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(
+      globalBaseDirectory: baseDirectory,
+      registeredAtDestination: (expected, "new-branch")
+    )
+
+    #expect(removedPaths == [expected])
+  }
+
+  @Test(.dependencies) func failedWorktreeCreationKeepsAnotherBranchAtTheDestination() async throws {
+    // Another creation can register the same destination between the existence check and
+    // `wt sw`. This attempt then fails, but the worktree there belongs to the other branch.
+    let baseDirectory = try makeTemporaryWorktreeBaseDirectory()
+    defer { try? FileManager.default.removeItem(at: baseDirectory) }
+    let destination = ProwlPaths.worktreeBaseDirectory(
+      for: URL(fileURLWithPath: "/tmp/repo"),
+      globalDefaultPath: baseDirectory.path(percentEncoded: false),
+      repositoryOverridePath: nil
+    )
+    .appending(path: "new-branch", directoryHint: .isDirectory)
+    .path(percentEncoded: false)
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(
+      globalBaseDirectory: baseDirectory,
+      registeredAtDestination: (destination, "other-branch")
+    )
+
+    #expect(removedPaths.isEmpty)
+  }
+
+  @Test(.dependencies) func failedWorktreeCreationKeepsADirectoryThatExistedBefore() async throws {
+    let baseDirectory = try makeTemporaryWorktreeBaseDirectory()
+    defer { try? FileManager.default.removeItem(at: baseDirectory) }
+    let existingDirectory = ProwlPaths.worktreeBaseDirectory(
+      for: URL(fileURLWithPath: "/tmp/repo"),
+      globalDefaultPath: baseDirectory.path(percentEncoded: false),
+      repositoryOverridePath: nil
+    )
+    .appending(path: "new-branch", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: existingDirectory, withIntermediateDirectories: true)
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(globalBaseDirectory: baseDirectory)
+
+    #expect(removedPaths.isEmpty)
+  }
+
+  @Test(.dependencies) func failedWorktreeCreationCleansUpTheOverrideDirectory() async throws {
+    let baseDirectory = try makeTemporaryWorktreeBaseDirectory()
+    defer { try? FileManager.default.removeItem(at: baseDirectory) }
+    let parentDirectory = try makeTemporaryWorktreeBaseDirectory()
+    defer { try? FileManager.default.removeItem(at: parentDirectory) }
+    let placement = WorktreePlacementOverride(name: "custom-leaf", path: parentDirectory.path(percentEncoded: false))
+    let defaultBaseDirectory = ProwlPaths.worktreeBaseDirectory(
+      for: URL(fileURLWithPath: "/tmp/repo"),
+      globalDefaultPath: baseDirectory.path(percentEncoded: false),
+      repositoryOverridePath: nil
+    )
+    let expected = try #require(
+      ProwlPaths.resolvedWorktreeDirectory(
+        defaultBaseDirectory: defaultBaseDirectory,
+        repositoryRootURL: URL(fileURLWithPath: "/tmp/repo"),
+        nameOverride: placement.name,
+        pathOverride: placement.path,
+        branchName: "new-branch"
+      )
+    )
+    #expect(!expected.path(percentEncoded: false).hasPrefix(defaultBaseDirectory.path(percentEncoded: false)))
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(
+      globalBaseDirectory: baseDirectory,
+      placement: placement,
+      registeredAtDestination: (expected.path(percentEncoded: false), "new-branch")
+    )
+
+    #expect(removedPaths == [expected.standardizedFileURL.path(percentEncoded: false)])
+  }
+
+  /// Runs a creation whose `wt sw` fails and returns the paths that failure cleanup removed.
+  private func cleanupPathsAfterFailedCreation(
+    globalBaseDirectory: URL,
+    placement: WorktreePlacementOverride = WorktreePlacementOverride(),
+    registeredAtDestination: (path: String, branch: String)? = nil
+  ) async -> [String] {
     let repoRoot = "/tmp/repo"
     let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
+    let registeredWorktrees =
+      [mainWorktree] + (registeredAtDestination.map { [makeWorktree(id: $0.path, name: $0.branch)] } ?? [])
     let repository = makeRepository(id: repoRoot, worktrees: [mainWorktree])
-    let removed = LockIsolated(false)
+    @Shared(.settingsFile) var settingsFile
+    $settingsFile.withLock {
+      $0.global.defaultWorktreeBaseDirectoryPath = globalBaseDirectory.path(percentEncoded: false)
+      $0.global.copyIgnoredOnWorktreeCreate = false
+      $0.global.copyUntrackedOnWorktreeCreate = false
+    }
+    let removedPaths = LockIsolated<[String]>([])
     let store = TestStore(initialState: makeState(repositories: [repository])) {
       RepositoriesFeature()
     } withDependencies: {
-      $0.gitClient.removeWorktree = { _, _ in
-        removed.withValue { $0 = true }
-        return URL(fileURLWithPath: "/tmp/removed")
+      $0.uuid = .incrementing
+      $0.gitClient.isValidBranchName = { _, _ in true }
+      $0.gitClient.localBranchNames = { _ in [] }
+      $0.gitClient.isBareRepository = { _ in false }
+      $0.gitClient.createWorktreeStream = { _ in
+        AsyncThrowingStream { continuation in
+          continuation.finish(throwing: GitClientError.commandFailed(command: "wt sw", message: "boom"))
+        }
+      }
+      $0.gitClient.removeWorktree = { worktree, _ in
+        let workingDirectory = await MainActor.run { worktree.workingDirectory }
+        removedPaths.withValue { $0.append(workingDirectory.path(percentEncoded: false)) }
+        return workingDirectory
       }
       $0.gitClient.pruneWorktrees = { _ in }
-      $0.gitClient.worktrees = { _ in [mainWorktree] }
+      $0.gitClient.worktrees = { _ in registeredWorktrees }
     }
-
-    let expectedAlert = AlertState<RepositoriesFeature.Alert> {
-      TextState("Unable to create worktree")
-    } actions: {
-      ButtonState(role: .cancel) {
-        TextState("OK")
-      }
-    } message: {
-      TextState("boom")
-    }
+    store.exhaustivity = .off
 
     await store.send(
       .worktreeCreation(
-        .createRandomWorktreeFailed(
-          title: "Unable to create worktree",
-          message: "boom",
-          pendingID: "pending:1",
-          previousSelection: nil,
+        .createWorktreeInRepository(
           repositoryID: repository.id,
-          name: "../../Desktop",
-          baseDirectory: URL(fileURLWithPath: "/tmp/repo/.worktrees")
+          nameSource: .explicit("new-branch"),
+          baseRefSource: .explicit("origin/main"),
+          fetchRemote: false,
+          placement: placement
         ))
-    ) {
-      $0.alert = expectedAlert
-    }
+    )
+    await store.receive(\.worktreeCreation.createRandomWorktreeFailed)
     await store.finish()
-    #expect(removed.value == false)
+    return removedPaths.value
+  }
+
+  private func makeTemporaryWorktreeBaseDirectory() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+      .appending(path: "prowl-worktree-cleanup-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
   }
 
   @Test(.dependencies) func createRandomWorktreeInRepositoryStreamsOutputLines() async {
@@ -3628,82 +3770,6 @@ struct RepositoriesFeatureTests {
     #expect(store.state.repositories[id: repository.id]?.worktrees[id: mainWorktree.id] != nil)
   }
 
-  @Test(.dependencies) func createRandomWorktreeFailureUsesProvidedBaseDirectoryForCleanup() async {
-    let repoRoot = "/tmp/repo"
-    let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
-    let repository = makeRepository(id: repoRoot, worktrees: [mainWorktree])
-    let createTimeBaseDirectory = ProwlPaths.worktreeBaseDirectory(
-      for: repository.rootURL,
-      globalDefaultPath: "/tmp/worktrees-original",
-      repositoryOverridePath: nil
-    )
-    let changedBaseDirectory = ProwlPaths.worktreeBaseDirectory(
-      for: repository.rootURL,
-      globalDefaultPath: "/tmp/worktrees-changed",
-      repositoryOverridePath: nil
-    )
-    let removedWorktree = LockIsolated<(path: String, deleteBranch: Bool)?>(nil)
-    @Shared(.settingsFile) var settingsFile
-    $settingsFile.withLock {
-      $0.global.defaultWorktreeBaseDirectoryPath = "/tmp/worktrees-changed"
-    }
-    let store = TestStore(initialState: makeState(repositories: [repository])) {
-      RepositoriesFeature()
-    } withDependencies: {
-      $0.gitClient.removeWorktree = { worktree, deleteBranch in
-        let workingDirectory = await MainActor.run { worktree.workingDirectory }
-        removedWorktree.withValue {
-          $0 = (workingDirectory.path(percentEncoded: false), deleteBranch)
-        }
-        return workingDirectory
-      }
-      $0.gitClient.pruneWorktrees = { _ in }
-    }
-    store.exhaustivity = .off
-
-    let expectedAlert = AlertState<RepositoriesFeature.Alert> {
-      TextState("Unable to create worktree")
-    } actions: {
-      ButtonState(role: .cancel) {
-        TextState("OK")
-      }
-    } message: {
-      TextState("boom")
-    }
-
-    await store.send(
-      .worktreeCreation(
-        .createRandomWorktreeFailed(
-          title: "Unable to create worktree",
-          message: "boom",
-          pendingID: "pending:test",
-          previousSelection: nil,
-          repositoryID: repository.id,
-          name: "new-branch",
-          baseDirectory: createTimeBaseDirectory
-        ))
-    ) {
-      $0.alert = expectedAlert
-    }
-    await store.finish()
-
-    #expect(changedBaseDirectory != createTimeBaseDirectory)
-    #expect(removedWorktree.value != nil)
-    #expect(removedWorktree.value?.deleteBranch == false)
-    #expect(
-      removedWorktree.value?.path
-        == createTimeBaseDirectory
-        .appending(path: "new-branch", directoryHint: .isDirectory)
-        .path(percentEncoded: false)
-    )
-    #expect(
-      removedWorktree.value?.path
-        != changedBaseDirectory
-        .appending(path: "new-branch", directoryHint: .isDirectory)
-        .path(percentEncoded: false)
-    )
-  }
-
   @Test func pendingProgressUpdateUpdatesPendingWorktreeState() async {
     let repoRoot = "/tmp/repo"
     let repository = makeRepository(
@@ -3782,7 +3848,7 @@ struct RepositoriesFeatureTests {
           previousSelection: nil,
           repositoryID: repository.id,
           name: nil,
-          baseDirectory: URL(fileURLWithPath: "/tmp/repo/.worktrees")
+          worktreeDirectory: nil
         ))
     ) {
       $0.pendingWorktrees = []
