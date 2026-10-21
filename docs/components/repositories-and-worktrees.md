@@ -105,9 +105,9 @@ mode → resolving the base ref → fetching → creating. A **Pending** row sho
 live status until it's ready.
 
 If creation fails, the error shows the end of Git's output, where Git and hooks
-report the cause. Prowl removes the worktree folder only if this attempt created it,
-and keeps the branch. A Git hook that exits with an error fails the creation, even
-when the checkout itself succeeded.
+report the cause. Prowl removes the worktree folder only if this attempt created it
+on the new branch, and keeps the branch. A Git hook that exits with an error fails
+the creation, even when the checkout itself succeeded.
 
 **Copying uncommitted files:** new worktrees can optionally copy `.gitignore`'d
 files (`copyIgnoredOnWorktreeCreate`) and/or untracked files

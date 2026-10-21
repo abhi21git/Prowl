@@ -3127,8 +3127,6 @@ struct RepositoriesFeatureTests {
     let baseDirectory = try makeTemporaryWorktreeBaseDirectory()
     defer { try? FileManager.default.removeItem(at: baseDirectory) }
 
-    let removedPaths = await cleanupPathsAfterFailedCreation(globalBaseDirectory: baseDirectory)
-
     let expected = ProwlPaths.worktreeBaseDirectory(
       for: URL(fileURLWithPath: "/tmp/repo"),
       globalDefaultPath: baseDirectory.path(percentEncoded: false),
@@ -3137,7 +3135,34 @@ struct RepositoriesFeatureTests {
     .appending(path: "new-branch", directoryHint: .isDirectory)
     .standardizedFileURL
     .path(percentEncoded: false)
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(
+      globalBaseDirectory: baseDirectory,
+      registeredAtDestination: (expected, "new-branch")
+    )
+
     #expect(removedPaths == [expected])
+  }
+
+  @Test(.dependencies) func failedWorktreeCreationKeepsAnotherBranchAtTheDestination() async throws {
+    // Another creation can register the same destination between the existence check and
+    // `wt sw`. This attempt then fails, but the worktree there belongs to the other branch.
+    let baseDirectory = try makeTemporaryWorktreeBaseDirectory()
+    defer { try? FileManager.default.removeItem(at: baseDirectory) }
+    let destination = ProwlPaths.worktreeBaseDirectory(
+      for: URL(fileURLWithPath: "/tmp/repo"),
+      globalDefaultPath: baseDirectory.path(percentEncoded: false),
+      repositoryOverridePath: nil
+    )
+    .appending(path: "new-branch", directoryHint: .isDirectory)
+    .path(percentEncoded: false)
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(
+      globalBaseDirectory: baseDirectory,
+      registeredAtDestination: (destination, "other-branch")
+    )
+
+    #expect(removedPaths.isEmpty)
   }
 
   @Test(.dependencies) func failedWorktreeCreationKeepsADirectoryThatExistedBefore() async throws {
@@ -3162,12 +3187,6 @@ struct RepositoriesFeatureTests {
     let parentDirectory = try makeTemporaryWorktreeBaseDirectory()
     defer { try? FileManager.default.removeItem(at: parentDirectory) }
     let placement = WorktreePlacementOverride(name: "custom-leaf", path: parentDirectory.path(percentEncoded: false))
-
-    let removedPaths = await cleanupPathsAfterFailedCreation(
-      globalBaseDirectory: baseDirectory,
-      placement: placement
-    )
-
     let defaultBaseDirectory = ProwlPaths.worktreeBaseDirectory(
       for: URL(fileURLWithPath: "/tmp/repo"),
       globalDefaultPath: baseDirectory.path(percentEncoded: false),
@@ -3183,16 +3202,26 @@ struct RepositoriesFeatureTests {
       )
     )
     #expect(!expected.path(percentEncoded: false).hasPrefix(defaultBaseDirectory.path(percentEncoded: false)))
+
+    let removedPaths = await cleanupPathsAfterFailedCreation(
+      globalBaseDirectory: baseDirectory,
+      placement: placement,
+      registeredAtDestination: (expected.path(percentEncoded: false), "new-branch")
+    )
+
     #expect(removedPaths == [expected.standardizedFileURL.path(percentEncoded: false)])
   }
 
   /// Runs a creation whose `wt sw` fails and returns the paths that failure cleanup removed.
   private func cleanupPathsAfterFailedCreation(
     globalBaseDirectory: URL,
-    placement: WorktreePlacementOverride = WorktreePlacementOverride()
+    placement: WorktreePlacementOverride = WorktreePlacementOverride(),
+    registeredAtDestination: (path: String, branch: String)? = nil
   ) async -> [String] {
     let repoRoot = "/tmp/repo"
     let mainWorktree = makeWorktree(id: repoRoot, name: "main", repoRoot: repoRoot)
+    let registeredWorktrees =
+      [mainWorktree] + (registeredAtDestination.map { [makeWorktree(id: $0.path, name: $0.branch)] } ?? [])
     let repository = makeRepository(id: repoRoot, worktrees: [mainWorktree])
     @Shared(.settingsFile) var settingsFile
     $settingsFile.withLock {
@@ -3219,7 +3248,7 @@ struct RepositoriesFeatureTests {
         return workingDirectory
       }
       $0.gitClient.pruneWorktrees = { _ in }
-      $0.gitClient.worktrees = { _ in [mainWorktree] }
+      $0.gitClient.worktrees = { _ in registeredWorktrees }
     }
     store.exhaustivity = .off
 

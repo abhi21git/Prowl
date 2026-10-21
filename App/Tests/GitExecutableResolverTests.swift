@@ -321,6 +321,26 @@ struct GitExecutableResolverTests {
     #expect(selected.searchPath == "\(fallback.path):\(loginPath)")
   }
 
+  @Test(arguments: [":/usr/bin:/bin", "/bin::/usr/bin", "bin:/usr/bin:/bin"])
+  func nonAbsoluteEntryBeforeTheSelectedGitPutsItFirst(loginPath: String) async throws {
+    // `wt` runs bare `git`. An empty or relative entry can resolve to a `git` in the
+    // repository, so it must not come before the selected Git.
+    let resolver = GitExecutableResolver(processPath: "/usr/bin:/bin", fallbackPaths: [])
+
+    let selected = try await resolver.resolve(shell: workingGitShell(loginPath: loginPath))
+
+    #expect(selected.url.path == "/usr/bin/git")
+    #expect(selected.searchPath == "/usr/bin:\(loginPath)")
+  }
+
+  @Test func nonAbsoluteEntryAfterTheSelectedGitKeepsTheLoginPath() async throws {
+    let resolver = GitExecutableResolver(processPath: "/usr/bin:/bin", fallbackPaths: [])
+
+    let selected = try await resolver.resolve(shell: workingGitShell(loginPath: "/usr/bin:/bin:"))
+
+    #expect(selected.searchPath == "/usr/bin:/bin:")
+  }
+
   @Test func processPathIsTheChildPathWithoutALoginPath() async throws {
     let resolver = GitExecutableResolver(processPath: "/usr/bin:/bin:/usr/sbin:/sbin", fallbackPaths: [])
 

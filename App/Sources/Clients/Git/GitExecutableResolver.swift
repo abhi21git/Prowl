@@ -165,10 +165,10 @@ actor GitExecutableResolver {
       let url = URL(fileURLWithPath: String(directory)).appending(path: "git")
       guard tried.insert(url.path).inserted, FileManager.default.isExecutableFile(atPath: url.path)
       else { continue }
-      // Put the selected Git first only when another Git would shadow it. A prepended
+      // Put the selected Git first only when another Git could shadow it. A prepended
       // directory also shadows the user's other tools, such as `python3` in /usr/bin.
       let searchPath =
-        Self.firstGitDirectory(in: childPath) == String(directory) ? childPath : "\(directory):\(childPath)"
+        Self.isFirstGit(in: String(directory), path: childPath) ? childPath : "\(directory):\(childPath)"
       let executable = GitExecutable(url: url, searchPath: searchPath)
       if try await validate(executable, shell: shell, diagnostics: &diagnostics) {
         return executable
@@ -177,10 +177,17 @@ actor GitExecutableResolver {
     return nil
   }
 
-  private static func firstGitDirectory(in path: String) -> String? {
-    path.split(separator: ":").map(String.init).first { directory in
-      directory.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: "\(directory)/git")
+  /// Whether a bare `git` lookup on `path` finds `directory` first. An empty or relative
+  /// entry resolves against the working directory, such as a repository with its own `git`,
+  /// so one before `directory` counts as a possible shadow.
+  private static func isFirstGit(in directory: String, path: String) -> Bool {
+    for entry in path.split(separator: ":", omittingEmptySubsequences: false).map(String.init) {
+      if entry == directory { return true }
+      if !entry.hasPrefix("/") || FileManager.default.isExecutableFile(atPath: "\(entry)/git") {
+        return false
+      }
     }
+    return false
   }
 
   private func validate(

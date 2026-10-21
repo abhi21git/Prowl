@@ -94,8 +94,10 @@ Issue #920 follow-up (2026-10-21):
   hook that calls a Homebrew tool failed with exit 127.
 - Select Git from the login shell PATH first, then the process PATH, then common
   locations. All app-owned Git and `wt` processes get the login PATH. Put the selected
-  Git's folder first only when an earlier Git on that PATH does not work: a prepended
-  folder such as `/usr/bin` also shadows the user's `python3`, `ruby`, and other tools.
+  Git's folder first only when an earlier Git on that PATH does not work, or an empty
+  or relative entry comes before it (`wt` runs bare `git`, which such an entry can
+  resolve to a `git` in the repository). A prepended folder such as `/usr/bin` also
+  shadows the user's `python3`, `ruby`, and other tools.
   Without a login PATH, use the process PATH. Read only the last stdout line of the
   login probe, because startup files can print (see 24027a919).
 - Callers that start `Process` directly use one shared environment
@@ -108,5 +110,7 @@ Issue #920 follow-up (2026-10-21):
   reload, so a failure alert closed within a second, before the user could read it.
   Alert actions that start a reload clear the alert themselves.
 - Failed creation cleanup keeps its policy (remove the folder, keep the branch). It
-  now targets the actual destination, including a custom name or parent folder, and
-  removes it only if that folder did not exist before the attempt.
+  now targets the actual destination, including a custom name or parent folder. It
+  removes the worktree only if that folder did not exist before the attempt and Git
+  registers it on the attempted branch: another creation can claim the same folder
+  between the check and `wt sw`.

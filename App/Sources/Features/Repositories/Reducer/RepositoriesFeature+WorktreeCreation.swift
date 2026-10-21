@@ -683,9 +683,18 @@ extension RepositoriesFeature {
       }
       if let cleanupWorktree = cleanup.worktree {
         let repositoryRootURL = cleanupWorktree.repositoryRootURL
+        let destination = comparableWorktreePath(cleanupWorktree.workingDirectory)
+        let branch = cleanupWorktree.name
         effects.append(
           .run { send in
-            _ = try? await gitClient.removeWorktree(cleanupWorktree, false)
+            // Another creation can register this destination first; its worktree is not ours.
+            let registered = (try? await gitClient.worktrees(repositoryRootURL)) ?? []
+            let ownsDestination = await MainActor.run {
+              registered.contains { comparableWorktreePath($0.workingDirectory) == destination && $0.name == branch }
+            }
+            if ownsDestination {
+              _ = try? await gitClient.removeWorktree(cleanupWorktree, false)
+            }
             _ = try? await gitClient.pruneWorktrees(repositoryRootURL)
             await send(.reloadRepositories(animated: true))
           }

@@ -78,6 +78,12 @@ func removeWorktree(
   return true
 }
 
+/// The path Git and Prowl use for the same worktree folder, without a trailing slash.
+func comparableWorktreePath(_ url: URL) -> String {
+  let path = GitClient.canonicalWorktreePath(url.path(percentEncoded: false))
+  return path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+}
+
 func cleanupFailedWorktree(
   repositoryID: Repository.ID,
   name: String?,
@@ -95,8 +101,18 @@ func cleanupFailedWorktree(
   let repositoryRootURL = URL(fileURLWithPath: repositoryID).standardizedFileURL
   let worktreeURL = worktreeDirectory.standardizedFileURL
   let worktreeID = worktreeURL.path(percentEncoded: false)
+  let knownWorktree = state.repositories[id: repositoryID]?.worktrees[id: worktreeID]
+  // A known worktree on another branch belongs to another creation.
+  if let knownWorktree, knownWorktree.name != name {
+    return FailedWorktreeCleanup(
+      didRemoveWorktree: false,
+      didUpdatePinned: false,
+      didUpdateOrder: false,
+      worktree: nil
+    )
+  }
   let worktree =
-    state.repositories[id: repositoryID]?.worktrees[id: worktreeID]
+    knownWorktree
     ?? Worktree(
       id: worktreeID,
       name: name,
