@@ -531,7 +531,10 @@ so those frames keep the last trusted state instead of forcing Idle.
 ## Remote agents over SSH
 
 When a pane's foreground command is a local `ssh`, Prowl shows the agent that runs on the
-host (docs-ai 082, L0). Prowl installs nothing on the host and edits no rc file.
+host (docs-ai 082, L0). Prowl installs nothing on the host and edits no rc file. SSH processes
+started by Git, scp, sftp, or rsync are transports, not remote agent sessions: they do not
+show a consent prompt or start detection. Direct commands such as `ssh -t host claude` and
+`ssh host tmux attach` still qualify.
 
 - **Consent.** Prowl does not connect to a host before you agree. The first `ssh` that
   Prowl can read shows "Detect agents on <host>?" in the toolbar status, with its panel

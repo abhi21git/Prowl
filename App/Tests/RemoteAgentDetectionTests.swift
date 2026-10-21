@@ -523,6 +523,78 @@ struct RemoteAgentDetectionTests {
     #expect(asked.isEmpty)
   }
 
+  @Test(arguments: ["git", "scp", "sftp", "rsync"], [false, true])
+  func aTransportSSHNeverAsksOrConnects(tool: String, throughShell: Bool) async {
+    let probe = Probe()
+    let fixture = makeConsentFixture(probe: probe)
+    defer { fixture.state.retireRemotePaneTracker(surfaceID: fixture.surfaceID) }
+    var asked: [String] = []
+    fixture.state.onRemoteAgentConsentNeeded = { _, destination in asked.append(destination) }
+    let toolPID = getpid() + 1
+    let shellPID = getpid() + 2
+    let command =
+      switch tool {
+      case "git": "git-upload-pack 'repo.git'"
+      case "scp": "scp -t /tmp/file"
+      case "sftp": "sftp"
+      default: "rsync --server ."
+      }
+    let arguments = ["ssh", "-o", "SendEnv=GIT_PROTOCOL", "git@git.linecorp.com", command]
+    // Read the SSH before its ancestors, including a shell used by GIT_SSH_COMMAND.
+    var processes = [
+      ForegroundProcess(
+        pid: getpid(), parentProcessID: throughShell ? shellPID : toolPID, name: "ssh", argv0: "ssh",
+        cmdline: arguments.joined(separator: " "), arguments: arguments)
+    ]
+    if throughShell {
+      processes.append(
+        ForegroundProcess(pid: shellPID, parentProcessID: toolPID, name: "sh", argv0: "sh", cmdline: "sh -c ssh"))
+    }
+    processes.append(
+      ForegroundProcess(pid: toolPID, parentProcessID: 1, name: tool, argv0: throughShell ? nil : tool, cmdline: tool))
+    probe.job = ForegroundJob(processGroupID: getpid(), processes: processes)
+
+    await detect(fixture)
+    #expect(asked.isEmpty)
+    #expect(fixture.state.remoteConsentAskedSSHBySurface.isEmpty)
+    #expect(fixture.state.remotePaneTrackers[fixture.surfaceID] == nil)
+
+    fixture.state.setRemoteAgentDetectionConsent(.enabled)
+    await detect(fixture)
+    #expect(fixture.state.remotePaneTrackers[fixture.surfaceID] == nil)
+    #expect(fixture.source.attempts == 0)
+    #expect(fixture.surface.bridge.state.remoteIndicator == nil)
+  }
+
+  @Test(arguments: [
+    ["dev@box"], ["-t", "dev@box", "claude"], ["dev@box", "tmux", "attach"], ["-T", "dev@box", "pi"],
+  ])
+  func aSessionSSHStillAsksAndConnects(arguments: [String]) async {
+    let probe = Probe()
+    let fixture = makeConsentFixture(probe: probe)
+    defer { fixture.state.retireRemotePaneTracker(surfaceID: fixture.surfaceID) }
+    var asked: [String] = []
+    fixture.state.onRemoteAgentConsentNeeded = { _, destination in asked.append(destination) }
+    let shellPID = getpid() + 1
+    probe.job = ForegroundJob(
+      processGroupID: getpid(),
+      processes: [
+        ForegroundProcess(
+          pid: getpid(), parentProcessID: shellPID, name: "ssh", argv0: "ssh", cmdline: "ssh",
+          arguments: ["ssh"] + arguments),
+        ForegroundProcess(pid: shellPID, parentProcessID: 1, name: "sh", argv0: "sh", cmdline: "sh"),
+      ])
+
+    await detect(fixture)
+    #expect(asked == ["dev@box"])
+    #expect(fixture.source.attempts == 0)
+
+    fixture.state.setRemoteAgentDetectionConsent(.enabled)
+    await detect(fixture)
+    await settle { fixture.source.recipes.count == 1 }
+    #expect(fixture.source.recipes.first?.destination == "dev@box")
+  }
+
   @Test func turningDetectionOnReadsTheOpenSSHWithoutAReconnect() async {
     let probe = Probe()
     let fixture = makeConsentFixture(probe: probe)
@@ -957,6 +1029,17 @@ struct RemoteAgentDetectionTests {
     await detect(fixture)
     #expect(tracker.correlation == .ambiguous)
     #expect(fixture.state.surfaceAgentStates[fixture.surfaceID]?.detectedAgent == nil)
+  }
+
+  @Test func anUnrelatedTransportInTheJobDoesNotHideTheSessionSSH() {
+    let job = ForegroundJob(
+      processGroupID: getpid(),
+      processes: sshJob.processes + [
+        ForegroundProcess(pid: getpid() + 1, parentProcessID: 1, name: "git", argv0: "git", cmdline: "git fetch")
+      ])
+    let ssh = WorktreeTerminalState.foregroundSSH(job)
+    #expect(ssh?.generation.pid == getpid())
+    #expect(ssh?.arguments == ["-p", "2222", "mini"])
   }
 
   @Test func aProxyJumpHelperNeverStandsInForTheTerminalsSSH() async throws {

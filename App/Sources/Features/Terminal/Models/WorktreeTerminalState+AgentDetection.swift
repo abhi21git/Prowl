@@ -535,24 +535,26 @@ extension WorktreeTerminalState {
   }
 
   /// The terminal's own foreground `ssh` and its arguments (without `argv[0]`), with the
-  /// generation that its tracker belongs to. An `ssh` that another `ssh` of the job started
-  /// (the `-W` transport of `-J`, or one under a `ProxyCommand` shell) is never it.
+  /// generation that its tracker belongs to. SSH started by Git, a file-transfer tool, or
+  /// another SSH (ProxyJump or ProxyCommand) is a transport, not the pane's session.
   nonisolated static func foregroundSSH(
     _ job: ForegroundJob
   ) -> (generation: LocalProcessGeneration, arguments: [String])? {
     func isSSH(_ process: ForegroundProcess) -> Bool { process.argv0 == "ssh" || process.name == "ssh" }
-    func hasSSHAncestor(_ process: ForegroundProcess) -> Bool {
+    func hasTransportAncestor(_ process: ForegroundProcess) -> Bool {
       var parent = process.parentPID
       for _ in job.processes.indices {
         guard let pid = parent, let ancestor = job.processes.first(where: { $0.ref.namespacePID == pid }) else {
           return false
         }
-        if isSSH(ancestor) { return true }
+        if isSSH(ancestor) || ["git", "scp", "sftp", "rsync"].contains(ancestor.argv0 ?? ancestor.name) {
+          return true
+        }
         parent = ancestor.parentPID
       }
       return false
     }
-    for process in job.processes where isSSH(process) && !hasSSHAncestor(process) {
+    for process in job.processes where isSSH(process) && !hasTransportAncestor(process) {
       guard let pid = process.ref.localPID, let arguments = process.arguments,
         let startedAt = ProcessDetection.processStartDate(pid: pid)
       else { continue }
