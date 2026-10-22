@@ -114,9 +114,12 @@ the host protocol only covers operations a remote folder can do.
 
 `RepositoryHost` exposes operations, not mechanisms. `GitClient` takes its executor from the
 host (`GitClient(executor:)`); the ad-hoc instances and the bypasses of G3 route through it
-or sit behind a capability. The six cwd-inferred `gh` calls pass `--repo owner/repo`, with
-`owner/repo` resolved once through the host, so `gh` stays local and a host without `gh`
-keeps PR status. The local host keeps the fast paths: direct reads of `HEAD`, `index.lock`,
+or sit behind a capability. The six cwd-inferred `gh` calls get an explicit target that
+keeps the code host (`[HOST/]OWNER/REPO`, as `repoArgument` in `GithubCLIClient.swift`
+already builds for enterprise hosts), resolved once through the host: positional for the two
+`gh repo view` calls (which have no `--repo` flag), `--repo` for the four `gh run` calls. `gh`
+then runs locally without a repository cwd, so a host without `gh` keeps PR status. Tests
+assert the arguments of all six calls, including a non-github.com host. The local host keeps the fast paths: direct reads of `HEAD`, `index.lock`,
 the index header that sets watcher timing, local untracked line counts, creation times, and
 the move-then-prune worktree removal. `observeChanges` wraps the five local monitor roles
 (four classes in `WorktreeInfoMonitors.swift`) into one host stream that keeps today's six watcher events;
@@ -142,17 +145,14 @@ connection (`ConnectionKey`, private `ControlPath`):
 - Host profiles persist in `~/.prowl/hosts.json` (`HostProfile` from
   `SSHConnectionRecipe.swift`, today without a store or caller), with the rebind state of C1.
 - `PersistedRepositoryEntry` gains an optional host. A remote entry stores the encoded ID in
-  `path`.
-- Downgrade safety has a floor: the first release that contains P0. Builds before it are not
-  supported after remote entries exist. Today, loading rewrites pinned IDs through
-  `PathPolicy.normalizePath`, which prepends the home directory to a non-absolute string
-  (`RepositoryPersistenceKeys.swift`), and a `.plain` entry loads without an existence check
-  (`RepositoriesFeature+RepositoryLoading.swift`). So P0 must make the current reader safe
-  for IDs it does not know:
-  - Load failures no longer prune pins or `prowlCreatedWorktreeIDs`.
-  - Every ID and entry-path normalizer passes a value that does not start with `/` through
-    unchanged and never writes it back altered.
-  - An entry whose path does not start with `/` loads as a failed row, for both kinds.
+  `path`. Running an older app build on these files is out of scope (decided 2026-10-22).
+- Load failures no longer prune pins or `prowlCreatedWorktreeIDs` (P0). An unreachable host
+  makes a remote repository fail to load, so the feature itself needs this guard.
+- ID and entry-path normalizers go through the codec (A2–A3). Today, loading rewrites pinned
+  IDs through `PathPolicy.normalizePath`, which prepends the home directory to a
+  non-absolute string (`RepositoryPersistenceKeys.swift`), and a `.plain` entry loads without
+  an existence check (`RepositoriesFeature+RepositoryLoading.swift`). Remote IDs and entries
+  must bypass both.
 - The snapshot cache moves to version 3 and skips a single entry instead of dropping the
   snapshot; remote entries skip the `fileExists` check.
 - The repository settings directory key includes the location, which also fixes today's
@@ -192,12 +192,19 @@ unavailable. Removing a host profile or repository states what happens to its da
 
 ### Terminals (D5)
 
-- Prowl stages a launcher on the host over the side channel: a mode 0600 file that sets the
-  cwd, the worktree environment (remote `PROWL_WORKTREE_PATH`/`PROWL_ROOT_PATH`),
-  `LC_PROWL_PANE`, and the setup, run or custom script, then removes itself. The pane gets
-  one typed line, `ssh -t <recipe> -- exec sh <path>`, with only safe characters. The
-  payload arrives byte for byte, whatever the remote login shell is. When ssh ends, the pane
-  returns to a local shell with the L0 ssh-ended marker.
+- Prowl stages a launcher on the host over the side channel (mode 0600 files that remove
+  themselves). The pane gets one typed line, `ssh -t <recipe> -- exec sh <path>`, with only
+  safe characters, so the payload arrives byte for byte and no authentication prompt can
+  read it. When ssh ends, the pane returns to a local shell with the L0 ssh-ended marker.
+- The launcher is a POSIX `sh` bootstrap. It sets the cwd, the worktree environment (remote
+  `PROWL_WORKTREE_PATH`/`PROWL_ROOT_PATH`) and `LC_PROWL_PANE`, then `exec`s the remote
+  user's interactive login shell. A setup, run or custom script runs as that shell's first
+  command, injected per shell while the user's own startup files still load: a `ZDOTDIR`
+  wrapper for zsh, `--rcfile` for bash, `--init-command` for fish. This matches local
+  behaviour, where the script is typed into the user's shell: the user's shell syntax, state
+  such as `cd` or an activated virtual environment that stays, and a tab that stays open. A
+  tab without a script is the same handoff with no first command. An unknown shell falls
+  back to `"$SHELL" -i -c <script>` and then `exec "$SHELL" -l`, without the persistent state.
 - The surface records `RemoteLaunchOrigin(hostProfileID)`. The tracker uses the stored recipe
   instead of parsing argv and skips the consent panel; the label shows the profile alias.
   `SSHInvocation` already treats `-t` and a trailing command as supported.
@@ -217,16 +224,16 @@ encoded ID keeps remote worktrees distinct.
 
 ## Slices and PRs
 
-Slices A1–A7 change nothing for local repositories; P0 changes only how the current reader
-handles failures and unknown IDs. B slices add unused code. C1–C4 stay behind
+Slices A1–A7 change nothing for local repositories; P0 only stops pruning on load failure.
+B slices add unused code. C1–C4 stay behind
 `PROWL_REMOTE_FOLDERS`; C5 turns it on, because before C4 a split of a remote pane opens a
 local shell and before C5 a restored remote leaf would come back as a local shell.
 
 | Slice | Content | Behaviour change |
 | --- | --- | --- |
-| P0 | Load failures do not prune pins or `prowlCreatedWorktreeIDs`; normalizers keep IDs that do not start with `/` unchanged; such entries load as failed rows (independent fix from `main`; the downgrade floor) | Pins survive an unavailable repository |
+| P0 | Load failures do not prune pins or `prowlCreatedWorktreeIDs` (independent fix from `main`) | Pins survive an unavailable repository |
 | A1 | One `Repository.terminalWorktree`; ID → path reversals become lookups | None |
-| A2 | `RepositoryLocation`, the ID codec, `localURL`, `.local` initializers, deprecated forwards | None |
+| A2 | `RepositoryLocation`, the ID codec (normalizers keep non-local IDs unchanged), `localURL`, `.local` initializers, deprecated forwards | None |
 | A3 | Call-site migration by category: identity and settings keys (with the basename fix and copy migration), git and file reads, terminal cwd and cwd matching, CLI; then delete the forwards. Two or three PRs | Settings directory key changes (migrated) |
 | A4 | Capabilities with location and reasons (including Profile launch), enforced at the reducer, launch and admission boundary | None |
 | A5 | `GitClient(executor:)`, ad-hoc instances and bypasses routed, `gh --repo` | None |
@@ -248,12 +255,12 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 | Id | Criterion |
 | --- | --- |
 | R-1 | The ID codec round-trips hostile paths (spaces, `%`, `#`, `:`, Unicode); local IDs are byte-identical to today's |
-| R-2 | A build at the downgrade floor (P0) that reads and saves files with remote git and plain entries and remote pins shows failed rows, opens no local path, keeps the entries and pins byte for byte, and the new build reopens them intact |
+| R-2 | Remote git and plain entries (with their host field) and remote pins survive load, save and an unreachable host unchanged; no normalizer turns a remote ID into a local path |
 | R-7 | A linked local worktree keeps distinct `workingDirectory` and `repositoryRootURL`, `isMain == false`, and both script environment paths through A2 |
 | R-8 | A remote target gets no Profile launch (UI disabled with a reason, refused at the launch boundary); the same Profile still launches locally |
 | R-9 | At the slice that turns the flag on, a restart with mixed local and remote tabs restores no remote leaf as a local shell and replays no script |
 | R-3 | A remote folder opens no connection before it is added; with L0 `disabled`, its panes still detect agents; `PROWL_REMOTE_AGENT_DETECTION=0` stops all side-channel connections |
-| R-4 | Setup, run and custom scripts arrive byte for byte with bash, zsh and fish as the remote login shell; a host key prompt never receives script text |
+| R-4 | With bash, zsh and fish as the remote login shell: setup, run and custom scripts arrive byte for byte and run in that shell (a shell-specific payload succeeds, for example zsh `${(U)value}`); a `cd` or `source` in the script persists at the prompt; a tab without a script stays connected at the requested cwd; no authentication prompt receives script text |
 | R-5 | Remote dirty state shows tracked line counts and the untracked file count within one polling interval |
 | R-6 | Every A slice keeps the existing test suite green and local watcher timing unchanged |
 
@@ -265,8 +272,9 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 | D2 Consent (2026-10-22) | Adding a folder is consent for its host profile, independent of the L0 setting | Folder panes still obey the L0 setting (a connected folder without agents); a global `enabled` as precondition (binds two different choices) |
 | D3 Order (2026-10-22) | Capabilities before the host boundary | Host boundary first (a larger protocol that shrinks later) |
 | D4 Remote dirty (2026-10-22) | Tracked line counts plus untracked file count | Untracked line counts on the host (unbounded cost per poll); dirty flag only (a different row and a new UI state) |
-| D5 Remote launch (2026-10-22) | Launcher staged over the side channel, one typed `ssh -t` line | Base64 payload on the ssh command line (blob in scrollback, `base64 -d/-D`, outer quoting); typed follow-up input (a prompt can read it) |
-| D6 Remote entries (2026-10-22) | Optional host on `PersistedRepositoryEntry`, encoded ID in `path`; downgrade floor = the release with P0 | A separate `remote-repositories.json` (safe for any older build, but two sources to merge) |
+| D5 Remote launch (2026-10-22) | Launcher staged over the side channel, one typed `ssh -t` line | Base64 payload on the ssh command line (blob in scrollback, `base64 -d/-D`, outer quoting); typed follow-up input (a prompt can read it, and if ssh fails the local shell runs it) |
+| D5a Script shell (2026-10-22, from review) | POSIX bootstrap, then the user's interactive login shell runs the script as its first command (zsh `ZDOTDIR`, bash `--rcfile`, fish `--init-command`) | `"$SHELL" -i -c` then handoff (script state does not persist; kept as the fallback for unknown shells); POSIX `sh` only (users must write POSIX scripts) |
+| D6 Remote entries (2026-10-22) | Optional host on `PersistedRepositoryEntry`, encoded ID in `path`; running an older app build is out of scope | A separate `remote-repositories.json` (safe for older builds, but two sources to merge) |
 | D7 Exposure (2026-10-22; moved from C3 to C5 in review) | `PROWL_REMOTE_FOLDERS` until C5 | Visible on merge (a folder without terminals); flag on at C3 (splits open local shells and restore loses remote leaves until C4–C5) |
 | D8 Found bugs (2026-10-22) | Pin prune guard now (P0); basename collision with the settings key change in A3 | Both independent now (key scheme decided early); both inside L1 slices (the prune bug stays longer) |
 
