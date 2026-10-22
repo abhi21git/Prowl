@@ -199,12 +199,30 @@ unavailable. Removing a host profile or repository states what happens to its da
 - The launcher is a POSIX `sh` bootstrap. It sets the cwd, the worktree environment (remote
   `PROWL_WORKTREE_PATH`/`PROWL_ROOT_PATH`) and `LC_PROWL_PANE`, then `exec`s the remote
   user's interactive login shell. A setup, run or custom script runs as that shell's first
-  command, injected per shell while the user's own startup files still load: a `ZDOTDIR`
-  wrapper for zsh, `--rcfile` for bash, `--init-command` for fish. This matches local
-  behaviour, where the script is typed into the user's shell: the user's shell syntax, state
-  such as `cd` or an activated virtual environment that stays, and a tab that stays open. A
-  tab without a script is the same handoff with no first command. An unknown shell falls
-  back to `"$SHELL" -i -c <script>` and then `exec "$SHELL" -l`, without the persistent state.
+  command, injected per shell while the user's own startup files load exactly once:
+  - zsh: a `ZDOTDIR` wrapper that restores the user's `ZDOTDIR` and sources their files.
+  - bash: `bash --posix -l` with `ENV` set to the wrapper, because a login bash ignores
+    `--rcfile` and POSIX mode reads only `ENV`. The wrapper restores normal mode and sources
+    the login startup files (`/etc/profile`, then the first of `~/.bash_profile`,
+    `~/.bash_login`, `~/.profile`), as Ghostty's bash integration
+    (`ThirdParty/ghostty/src/shell-integration/bash/ghostty.bash`) does.
+  - fish: `--init-command`, which runs after the user's configuration.
+
+  Each wrapper clears its injection variables before the first command, so nested shells
+  never replay it. This matches local behaviour, where the script is typed into the
+  user's shell: the user's shell syntax, state such as `cd` or an activated virtual
+  environment that stays, and a tab that stays open. A tab without a script is the same
+  handoff with no first command. An unknown shell falls back to `"$SHELL" -i -c <script>` and then
+  `exec "$SHELL" -l`, without the persistent state.
+- Completion. Locally, custom command success, Close on Success and CLI command waiters run
+  on `GHOSTTY_ACTION_COMMAND_FINISHED` (`handleCommandFinished` in
+  `WorktreeTerminalState+Notifications.swift`), which the local shell integration produces
+  with OSC 133. A remote host has no shell integration. So the wrapper reports the first
+  command's exit status itself, with a marker that carries a per-launch nonce and passes
+  through ssh. The surface maps a marker with the matching nonce to `handleCommandFinished`
+  once. For a remote launch, the outer `ssh` command finishing never counts as script
+  completion, so a later successful ssh exit cannot report a failed script as success. The
+  marker format (an OSC 7501 extension or framed OSC 133) is chosen in C3.
 - The surface records `RemoteLaunchOrigin(hostProfileID)`. The tracker uses the stored recipe
   instead of parsing argv and skips the consent panel; the label shows the profile alias.
   `SSHInvocation` already treats `-t` and a trailing command as supported.
@@ -244,7 +262,7 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 | B3 | `RemoteRepositoryHost` and the batched refresh, parser tested with recorded output | None (unused) |
 | C1 | Add Remote Folder, per-profile consent, rebind prompt, unreachable state | Behind the flag |
 | C2 | CLI and Mirror `host` field, local-only `prowl open`, `alias:/path` selector, workflow `rootKey` | Behind the flag |
-| C3 | Launcher, remote tabs and scripts, `RemoteLaunchOrigin` | Behind the flag |
+| C3 | Launcher with per-shell handoff and completion marker, remote tabs and scripts, `RemoteLaunchOrigin` | Behind the flag |
 | C4 | Tracker cwd accessor, remote splits, remote agent cwd | Behind the flag |
 | C5 | Snapshot origin, reconnect on restore, `docs/` update; flag on | Remote folders ship |
 
@@ -260,7 +278,8 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 | R-8 | A remote target gets no Profile launch (UI disabled with a reason, refused at the launch boundary); the same Profile still launches locally |
 | R-9 | At the slice that turns the flag on, a restart with mixed local and remote tabs restores no remote leaf as a local shell and replays no script |
 | R-3 | A remote folder opens no connection before it is added; with L0 `disabled`, its panes still detect agents; `PROWL_REMOTE_AGENT_DETECTION=0` stops all side-channel connections |
-| R-4 | With bash, zsh and fish as the remote login shell: setup, run and custom scripts arrive byte for byte and run in that shell (a shell-specific payload succeeds, for example zsh `${(U)value}`); a `cd` or `source` in the script persists at the prompt; a tab without a script stays connected at the requested cwd; no authentication prompt receives script text |
+| R-4 | With bash 3.2, bash 5, zsh and fish as the remote login shell: setup, run and custom scripts arrive byte for byte and run in that shell (a shell-specific payload succeeds, for example zsh `${(U)value}`); the login startup files load exactly once; a `cd` or `source` in the script persists at the prompt; a nested shell does not replay it; a tab without a script stays connected at the requested cwd; no authentication prompt receives script text |
+| R-10 | On a host without shell integration: a custom command `true` with Close on Success closes its pane; `false` stays open with failure; the success notice fires once; a CLI command waiter completes while the remote shell stays connected; a later ssh exit after a failed script reports no success |
 | R-5 | Remote dirty state shows tracked line counts and the untracked file count within one polling interval |
 | R-6 | Every A slice keeps the existing test suite green and local watcher timing unchanged |
 
@@ -273,7 +292,7 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 | D3 Order (2026-10-22) | Capabilities before the host boundary | Host boundary first (a larger protocol that shrinks later) |
 | D4 Remote dirty (2026-10-22) | Tracked line counts plus untracked file count | Untracked line counts on the host (unbounded cost per poll); dirty flag only (a different row and a new UI state) |
 | D5 Remote launch (2026-10-22) | Launcher staged over the side channel, one typed `ssh -t` line | Base64 payload on the ssh command line (blob in scrollback, `base64 -d/-D`, outer quoting); typed follow-up input (a prompt can read it, and if ssh fails the local shell runs it) |
-| D5a Script shell (2026-10-22, from review) | POSIX bootstrap, then the user's interactive login shell runs the script as its first command (zsh `ZDOTDIR`, bash `--rcfile`, fish `--init-command`) | `"$SHELL" -i -c` then handoff (script state does not persist; kept as the fallback for unknown shells); POSIX `sh` only (users must write POSIX scripts) |
+| D5a Script shell (2026-10-22, from review) | POSIX bootstrap, then the user's interactive login shell runs the script as its first command (zsh `ZDOTDIR`, bash `--posix -l` with `ENV`, fish `--init-command`), with its own completion marker | `"$SHELL" -i -c` then handoff (script state does not persist; kept as the fallback for unknown shells); POSIX `sh` only (users must write POSIX scripts) |
 | D6 Remote entries (2026-10-22) | Optional host on `PersistedRepositoryEntry`, encoded ID in `path`; running an older app build is out of scope | A separate `remote-repositories.json` (safe for older builds, but two sources to merge) |
 | D7 Exposure (2026-10-22; moved from C3 to C5 in review) | `PROWL_REMOTE_FOLDERS` until C5 | Visible on merge (a folder without terminals); flag on at C3 (splits open local shells and restore loses remote leaves until C4–C5) |
 | D8 Found bugs (2026-10-22) | Pin prune guard now (P0); basename collision with the settings key change in A3 | Both independent now (key scheme decided early); both inside L1 slices (the prune bug stays longer) |
@@ -285,6 +304,8 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 - Close confirmation: Ghostty reports a live process while `ssh` runs, so every remote pane
   asks before it closes.
 - Launcher location (`$TMPDIR` or `~/.cache/prowl`) and cleanup when ssh never runs it.
+- Completion marker format, and whether framed OSC 133 inside the outer `ssh` command
+  confuses Ghostty's prompt tracking for the local shell.
 - Where `wt` puts remote worktrees (the worktree base directory setting is a local path).
 - Rebind UI for a changed `HostName`, and the behaviour of the folder lane while paused.
 
