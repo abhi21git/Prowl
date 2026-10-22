@@ -201,11 +201,13 @@ unavailable. Removing a host profile or repository states what happens to its da
   user's interactive login shell. A setup, run or custom script runs as that shell's first
   command, injected per shell while the user's own startup files load exactly once:
   - zsh: a `ZDOTDIR` wrapper that restores the user's `ZDOTDIR` and sources their files.
-  - bash: `bash --posix -l` with `ENV` set to the wrapper, because a login bash ignores
-    `--rcfile` and POSIX mode reads only `ENV`. The wrapper restores normal mode and sources
-    the login startup files (`/etc/profile`, then the first of `~/.bash_profile`,
-    `~/.bash_login`, `~/.profile`), as Ghostty's bash integration
-    (`ThirdParty/ghostty/src/shell-integration/bash/ghostty.bash`) does.
+  - bash: `bash --noprofile --rcfile <wrapper> -i`, an interactive non-login shell. The
+    wrapper sources the login startup files itself (`/etc/profile`, then the first of
+    `~/.bash_profile`, `~/.bash_login`, `~/.profile`), then runs the first command. A login
+    bash ignores `--rcfile`, and the `--posix -l` + `ENV` route of Ghostty's bash
+    integration (`ThirdParty/ghostty/src/shell-integration/bash/ghostty.bash`) does not run
+    `ENV` on macOS bash 3.2. The cost: `shopt login_shell` is off and `~/.bash_logout` does
+    not run.
   - fish: `--init-command`, which runs after the user's configuration.
 
   Each wrapper clears its injection variables before the first command, so nested shells
@@ -292,7 +294,7 @@ local shell and before C5 a restored remote leaf would come back as a local shel
 | D3 Order (2026-10-22) | Capabilities before the host boundary | Host boundary first (a larger protocol that shrinks later) |
 | D4 Remote dirty (2026-10-22) | Tracked line counts plus untracked file count | Untracked line counts on the host (unbounded cost per poll); dirty flag only (a different row and a new UI state) |
 | D5 Remote launch (2026-10-22) | Launcher staged over the side channel, one typed `ssh -t` line | Base64 payload on the ssh command line (blob in scrollback, `base64 -d/-D`, outer quoting); typed follow-up input (a prompt can read it, and if ssh fails the local shell runs it) |
-| D5a Script shell (2026-10-22, from review) | POSIX bootstrap, then the user's interactive login shell runs the script as its first command (zsh `ZDOTDIR`, bash `--posix -l` with `ENV`, fish `--init-command`), with its own completion marker | `"$SHELL" -i -c` then handoff (script state does not persist; kept as the fallback for unknown shells); POSIX `sh` only (users must write POSIX scripts) |
+| D5a Script shell (2026-10-22, from review) | POSIX bootstrap, then the user's interactive login shell runs the script as its first command (zsh `ZDOTDIR`, bash `--rcfile` on a non-login interactive shell that replays the login files, fish `--init-command`), with its own completion marker | `"$SHELL" -i -c` then handoff (script state does not persist; kept as the fallback for unknown shells); POSIX `sh` only (users must write POSIX scripts) |
 | D6 Remote entries (2026-10-22) | Optional host on `PersistedRepositoryEntry`, encoded ID in `path`; running an older app build is out of scope | A separate `remote-repositories.json` (safe for older builds, but two sources to merge) |
 | D7 Exposure (2026-10-22; moved from C3 to C5 in review) | `PROWL_REMOTE_FOLDERS` until C5 | Visible on merge (a folder without terminals); flag on at C3 (splits open local shells and restore loses remote leaves until C4–C5) |
 | D8 Found bugs (2026-10-22) | Pin prune guard now (P0); basename collision with the settings key change in A3 | Both independent now (key scheme decided early); both inside L1 slices (the prune bug stays longer) |
